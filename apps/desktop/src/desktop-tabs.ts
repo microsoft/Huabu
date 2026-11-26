@@ -14,6 +14,7 @@ import {
 } from 'electron';
 
 import { classifyLink } from './link-targets.js';
+import { PagePreviews } from './page-previews.js';
 import { isSameOrigin } from './server-target.js';
 import {
   parseTabNavigation,
@@ -114,6 +115,8 @@ export class DesktopTabs {
   private preferences: Record<string, string> = {};
   /** System notifications still showing, by Tab, each with what it tells. */
   private notices = new Map<string, Map<Notification, readonly string[]>>();
+  /** Other sites' pages shown in a Space's Preview panel. */
+  readonly previews: PagePreviews;
 
   constructor(
     private win: BrowserWindow,
@@ -123,6 +126,15 @@ export class DesktopTabs {
     private configureSession?: (value: Electron.Session) => void,
   ) {
     this.origin = new URL(baseUrl).origin;
+    this.previews = new PagePreviews(win, this.origin, {
+      partitionOf: (owner) =>
+        this.spacePartition(
+          'pages',
+          this.contentTab(owner).state.canvasId ?? '',
+        ),
+      frameOf: (owner) => this.frameOf(owner),
+      handleInput: (event, input) => this.handleInput(event, input),
+    });
     this.sessionPath = join(userData, 'desktop-tabs.json');
     try {
       const raw: unknown = JSON.parse(readFileSync(this.sessionPath, 'utf8'));
@@ -193,6 +205,24 @@ export class DesktopTabs {
     return contents === this.win.webContents;
   }
 
+  isSpace(contents: WebContents): boolean {
+    return this.tabs.some(
+      (tab) => tab.state.canvasId && tab.view?.webContents === contents,
+    );
+  }
+
+  /** Where the Tab in front sits in the window; `null` for any other. */
+  private frameOf(contents: WebContents): Electron.Rectangle | null {
+    if (this.win.isDestroyed() || this.activeContents !== contents) return null;
+    const [width, height] = this.win.getContentSize();
+    return {
+      x: 0,
+      y: TITLE_BAR_HEIGHT,
+      width,
+      height: Math.max(0, height - TITLE_BAR_HEIGHT),
+    };
+  }
+
   private contentTab(contents: WebContents): ContentTab {
     const tab = this.tabs.find((entry) => entry.view?.webContents === contents);
     if (!tab) throw new Error('This renderer does not own a content Tab');
@@ -224,9 +254,7 @@ export class DesktopTabs {
       webPreferences: {
         ...(canvasId
           ? {
-              partition: `persist:huabu-space-${createHash('sha256')
-                .update(JSON.stringify([this.sessionKey(), canvasId]))
-                .digest('hex')}`,
+              partition: this.spacePartition('space', canvasId),
             }
           : {}),
         preload: join(__dirname, 'preload.js'),
@@ -254,7 +282,10 @@ export class DesktopTabs {
         this.fail(tab, description);
       },
     );
+    // A page that reloads cannot say its previewed pages are gone.
+    contents.on('did-navigate', () => this.previews.closeAll(contents));
     contents.on('render-process-gone', (_event, details) => {
+      this.previews.closeAll(contents);
       tab.ready = false;
       const message = `Space renderer stopped: ${details.reason}`;
       this.fail(tab, message);
@@ -409,12 +440,20 @@ export class DesktopTabs {
         height: Math.max(0, height - TITLE_BAR_HEIGHT),
       });
     }
+    this.previews.layout();
   }
 
   private publish(): void {
     if (!this.win.webContents.isDestroyed()) {
       this.broadcast('tabs:state', this.snapshot);
     }
+  }
+
+  /** A Space's own storage, or that of the web pages previewed in it. */
+  private spacePartition(kind: 'space' | 'pages', canvasId: string): string {
+    return `persist:huabu-${kind}-${createHash('sha256')
+      .update(JSON.stringify([this.sessionKey(), canvasId]))
+      .digest('hex')}`;
   }
 
   private sessionKey(): string {
@@ -1392,6 +1431,7 @@ export class DesktopTabs {
     const view = tab.view;
     if (!view) return;
     tab.view = null;
+    this.previews.closeAll(view.webContents);
     this.win.contentView.removeChildView(view);
     view.webContents.close({ waitForBeforeUnload: false });
   }
@@ -1401,6 +1441,7 @@ export class DesktopTabs {
       request.reject(new Error('Window was closed'));
     this.drains.clear();
     for (const tab of this.tabs) this.destroyTab(tab);
+    this.previews.dispose();
   }
 }
 

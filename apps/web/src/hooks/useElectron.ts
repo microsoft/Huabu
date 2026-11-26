@@ -139,6 +139,39 @@ interface ElectronFilesApi {
   open: (url: string) => Promise<void>;
 }
 
+export interface PagePreviewRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface PagePreviewState {
+  id: string;
+  loading: boolean;
+  error: string | null;
+}
+
+/**
+ * Another site's web page, shown by the desktop app in a view of its own
+ * over a rectangle of this page. Present only in a Space's Tab.
+ */
+export interface ElectronPagePreviewApi {
+  show: (
+    id: string,
+    url: string,
+  ) => Promise<{ ok: true } | { ok: false; error: string }>;
+  /** `rect` is in this page's CSS pixels, from its top-left corner. */
+  place: (id: string, rect: PagePreviewRect) => void;
+  /** Resolves to a picture of the page to show while it is away. */
+  hide: (id: string) => Promise<string | null>;
+  reload: (id: string) => void;
+  close: (id: string) => void;
+  onState: (callback: (state: PagePreviewState) => void) => () => void;
+  /** The user clicked into the page, which this page cannot see. */
+  onFocus: (callback: (id: string) => void) => () => void;
+}
+
 interface ElectronDialogApi {
   pickFolder: (
     title?: string,
@@ -233,6 +266,7 @@ interface ElectronBridge {
   diagnostics?: ElectronDiagnosticsApi;
   dialog?: ElectronDialogApi;
   files?: ElectronFilesApi;
+  pagePreview?: ElectronPagePreviewApi;
   menu?: ElectronMenuApi;
   updater?: ElectronUpdaterApi;
   tabs?: DesktopTabsApi;

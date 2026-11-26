@@ -60,6 +60,7 @@ import {
 } from './desktop-tabs.js';
 import { LocalAgentManager, type LocalAgentCredential } from './local-agent.js';
 import { applyApplicationMenu, registerMenuIpc } from './mac-menu.js';
+import { registerPagePreviewIpc } from './page-previews.js';
 import {
   promptForRemoteBasicAuth,
   registerRemoteBasicAuth,
@@ -1076,24 +1077,12 @@ function closeSplashWindow(): void {
 }
 
 /**
- * Allow cross-origin web pages to be embedded inside our renderer's
- * `<iframe>` elements.
+ * What every session holding the application's own pages gets: the
+ * permission and download policy, and the launch token on its requests.
  *
- * Sites commonly block embedding by sending `X-Frame-Options: DENY |
- * SAMEORIGIN` or `Content-Security-Policy: frame-ancestors …`. Inside an
- * Electron desktop app these headers are over-protective: the only frame
- * we ever embed into is the user's own canvas, so we strip the embedding
- * restrictions on the response headers before Chromium enforces them.
- *
- * This is intentionally desktop-only — the plain web build runs in the
- * user's browser and cannot rewrite response headers, so its Web node
- * Preview will fall back to the Reader view when the live iframe is
- * blocked. The renderer still gets full Chromium sandboxing, contextIso-
- * lation, and `webPreferences.sandbox: true`, so a malicious embedded
- * page cannot reach into the host.
- *
- * Same-origin requests (our own `/api/*`, the SPA chunks) are filtered
- * out so we never weaken our own security headers.
+ * Response headers are left as the site sent them. A site that refuses to be
+ * framed is not framed: the Preview panel shows it in a view of its own
+ * (`page-previews.ts`).
  */
 function configureWebSession(
   serverOrigin: string,
@@ -1108,32 +1097,6 @@ function configureWebSession(
     sendLaunchToken(webSession, launchToken, [
       ...new Set([serverOrigin, `http://127.0.0.1:${serverPort}`]),
     ]);
-  const filter = { urls: ['<all_urls>'] };
-  webSession.webRequest.onHeadersReceived(filter, (details, callback) => {
-    // Leave our own origin alone — stripping CSP from our SPA would be
-    // a self-inflicted XSS expansion. Match the runtime origin so HMR
-    // dev servers and the loopback server are both covered.
-    if (isSameOrigin(details.url, serverOrigin)) {
-      callback({});
-      return;
-    }
-
-    const headers: Record<string, string[] | string> = {};
-    for (const [name, value] of Object.entries(details.responseHeaders ?? {})) {
-      const lower = name.toLowerCase();
-      if (lower === 'x-frame-options') continue;
-      if (lower === 'content-security-policy') {
-        const values = Array.isArray(value) ? value : [value];
-        const cleaned = values
-          .map((v) => v.replace(/frame-ancestors[^;]*;?/gi, '').trim())
-          .filter((v) => v.length > 0);
-        if (cleaned.length > 0) headers[name] = cleaned;
-        continue;
-      }
-      headers[name] = value as string | string[];
-    }
-    callback({ responseHeaders: headers });
-  });
 }
 
 function createWindow(url: string): void {
@@ -1371,6 +1334,10 @@ app.whenReady().then(async () => {
   }
   registerMenuIpc(() => mainWindow, assertApplicationSender);
   registerDesktopTabsIpc(() => desktopTabs);
+  registerPagePreviewIpc((event) => {
+    assertApplicationSender(event);
+    return desktopTabs?.isSpace(event.sender) ? desktopTabs.previews : null;
+  });
   // Auto-update IPC must exist before the first render so the preload
   // bridge's `update:get-state` / `update:check` calls always resolve.
   // The actual GitHub-feed checks only run in a packaged app.

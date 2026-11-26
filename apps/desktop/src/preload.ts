@@ -136,8 +136,45 @@ const tabs: DesktopTabsApi | undefined =
       }
     : undefined;
 
+/**
+ * Another site's web page, shown by the main process in a view of its own
+ * over the rectangle a Space's page names. See `page-previews.ts`.
+ */
+const pagePreview =
+  desktopRole === 'space'
+    ? {
+        show: (
+          id: string,
+          url: string,
+        ): Promise<{ ok: true } | { ok: false; error: string }> =>
+          ipcRenderer.invoke('page-preview:show', id, url) as Promise<
+            { ok: true } | { ok: false; error: string }
+          >,
+        place: (
+          id: string,
+          rect: { x: number; y: number; width: number; height: number },
+        ): void => ipcRenderer.send('page-preview:place', id, rect),
+        /** Resolves to a picture of the page to show while it is away. */
+        hide: (id: string): Promise<string | null> =>
+          ipcRenderer.invoke('page-preview:hide', id) as Promise<string | null>,
+        reload: (id: string): void =>
+          ipcRenderer.send('page-preview:reload', id),
+        close: (id: string): void => ipcRenderer.send('page-preview:close', id),
+        onState: (
+          callback: (state: {
+            id: string;
+            loading: boolean;
+            error: string | null;
+          }) => void,
+        ) => subscribe('page-preview:state', callback),
+        onFocus: (callback: (id: string) => void) =>
+          subscribe('page-preview:focus', callback),
+      }
+    : undefined;
+
 contextBridge.exposeInMainWorld('electronBridge', {
   ...(tabs ? { tabs } : {}),
+  ...(pagePreview ? { pagePreview } : {}),
   versions: {
     node: process.versions.node,
     chrome: process.versions.chrome,

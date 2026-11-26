@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   },
   getWebPreview: vi.fn(),
   getWebPage: vi.fn(),
+  getWebReader: vi.fn(),
   openPreviewNode: vi.fn(),
   bridge: vi.fn(),
   bridgeLoad: vi.fn(),
@@ -40,6 +41,7 @@ vi.mock('@/hooks/useNodePresentation', () => ({
 vi.mock('@/api/web', () => ({
   getWebPreview: mocks.getWebPreview,
   getWebPage: mocks.getWebPage,
+  getWebReader: mocks.getWebReader,
 }));
 vi.mock('@/api/artifact', () => ({
   resolveArtifactUrl: mocks.resolveArtifactUrl,
@@ -126,6 +128,7 @@ beforeEach(() => {
     summary: 'Existing summary',
   });
   mocks.getWebPage.mockResolvedValue({ kind: 'html', src: 'art_page.html' });
+  mocks.getWebReader.mockResolvedValue({ html: '<p>Extracted text</p>' });
   container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
@@ -143,13 +146,20 @@ function element<T extends HTMLElement = HTMLElement>(selector: string): T {
   return result;
 }
 
+/** Present once the Server has extracted the page's text. */
+const EXTRACTED: Partial<CanvasWebNodeData> = { content: 'Extracted text' };
+
 async function render(data: Partial<CanvasWebNodeData> = {}) {
   await act(async () => {
     root.render(
       <WebNode
         {...({
           id: 'web-1',
-          data: { src: 'https://example.com/original', ...data },
+          data: {
+            src: 'https://example.com/original',
+            ...EXTRACTED,
+            ...data,
+          },
           selected: mocks.presentation.isSoleSelected,
           width: 800,
           height: 500,
@@ -171,15 +181,37 @@ describe('WebNode reading presentation', () => {
     expect(mocks.getWebPage).not.toHaveBeenCalled();
   });
 
-  it('renders the original remote URL without snapshot resolution or elevated privileges', async () => {
+  it('shows another site as its reader view and never loads the site', async () => {
     mocks.presentation.mode = 'reading';
     await render();
     const iframe = element('iframe');
-    expect(iframe.getAttribute('src')).toBe('https://example.com/original');
-    expect(iframe.getAttribute('sandbox')).toBe('allow-scripts allow-forms');
-    expect(iframe.getAttribute('referrerpolicy')).toBe('no-referrer');
+    expect(iframe.hasAttribute('src')).toBe(false);
+    expect(iframe.getAttribute('srcdoc')).toContain('<p>Extracted text</p>');
+    expect(iframe.getAttribute('sandbox')).toBe('allow-popups allow-scripts');
+    expect(mocks.getWebReader).toHaveBeenCalledExactlyOnceWith({
+      canvasId: 'canvas-1',
+      nodeId: 'web-1',
+    });
     expect(mocks.getWebPage).not.toHaveBeenCalled();
     expect(container.querySelector('[data-preview-card]')).toBeNull();
+  });
+
+  it('keeps the overview card for another site that has no reader view', async () => {
+    mocks.presentation.mode = 'reading';
+    mocks.getWebReader.mockRejectedValue(
+      new Error('Source has no content yet'),
+    );
+    await render();
+    expect(container.querySelector('iframe')).toBeNull();
+    expect(container.querySelector('[data-preview-card]')).not.toBeNull();
+
+    // Before the Server has extracted anything there is nothing to ask for.
+    mocks.getWebReader.mockClear();
+    await render({ src: 'https://example.com/other', content: '' });
+    expect(mocks.getWebReader).not.toHaveBeenCalled();
+    expect(container.querySelector('iframe')).toBeNull();
+    expect(container.querySelector('[data-preview-card]')).not.toBeNull();
+    expect(mocks.getWebPage).not.toHaveBeenCalled();
   });
 
   it('keeps a header-free reader viewport in screen pixels across zoom changes', async () => {
@@ -208,39 +240,33 @@ describe('WebNode reading presentation', () => {
 
   it('shows detectable iframe errors and permits retry without selection', async () => {
     mocks.presentation.mode = 'reading';
-    await render();
+    await render({ src: 'art_page.html' });
     const iframe = element('iframe');
     act(() => iframe.dispatchEvent(new Event('error')));
     expect(container.textContent).toContain('node.failedLoadPage');
     expect(container.querySelector('iframe')).toBeNull();
     expect(container.querySelector('[data-web-interaction-shield]')).toBeNull();
-    expect(
-      container.querySelector(
-        '[data-node-actions] a[href="https://example.com/original"]',
-      ),
-    ).not.toBeNull();
     const retry = Array.from(container.querySelectorAll('button')).find(
       (button) => button.textContent === 'messages.retry',
     );
     if (!retry) throw new Error('Missing retry button');
-    act(() => retry.click());
+    await act(async () => retry.click());
     expect(element('iframe')).not.toBe(iframe);
     expect(element('iframe').getAttribute('src')).toBe(
-      'https://example.com/original',
+      '/api/canvas/canvas-1/artifact/art_page.html',
     );
     expect(container.textContent).not.toContain('node.failedLoadPage');
     expect(
       container.querySelector('[data-web-interaction-shield]'),
     ).not.toBeNull();
-    expect(mocks.getWebPage).not.toHaveBeenCalled();
   });
 
   it('shields unselected and multi-selected pages and enables only sole selection', async () => {
     mocks.presentation.mode = 'reading';
     await render();
-    let iframe = element('iframe');
-    expect(iframe.hasAttribute('inert')).toBe(true);
-    expect(iframe.className).toContain('pointer-events-none');
+    let page = element('[data-web-reader]');
+    expect(page.hasAttribute('inert')).toBe(true);
+    expect(page.className).toContain('pointer-events-none');
     const shield = element('[data-web-interaction-shield]');
     const wheel = vi.fn();
     container.addEventListener('wheel', wheel);
@@ -249,20 +275,21 @@ describe('WebNode reading presentation', () => {
 
     mocks.presentation.isSoleSelected = true;
     await render();
-    expect(container.querySelector('iframe')).toBe(iframe);
-    expect(iframe.hasAttribute('inert')).toBe(false);
+    expect(element('[data-web-reader]')).toBe(page);
+    expect(page.hasAttribute('inert')).toBe(false);
+    expect(page.className).toContain('nowheel');
     expect(container.querySelector('[data-web-interaction-shield]')).toBeNull();
 
     mocks.presentation.isSoleSelected = false;
     await render();
-    iframe = element('iframe');
-    expect(iframe.hasAttribute('inert')).toBe(true);
+    page = element('[data-web-reader]');
+    expect(page.hasAttribute('inert')).toBe(true);
     expect(
       container.querySelector('[data-web-interaction-shield]'),
     ).not.toBeNull();
   });
 
-  it('unmounts live pages offscreen, in overview, and in minimal presentation', async () => {
+  it('unmounts reading views offscreen, in overview, and in minimal presentation', async () => {
     mocks.presentation.mode = 'reading';
     await render();
     expect(container.querySelector('iframe')).not.toBeNull();
@@ -292,19 +319,13 @@ describe('WebNode reading presentation', () => {
       'node.download',
     );
     expect(element('[data-web-reading]').contains(link)).toBe(false);
-    act(() => element('iframe').dispatchEvent(new Event('load')));
-    expect(element('iframe').getAttribute('src')).toBe(
-      'https://example.com/original',
-    );
-    expect(container.contains(link)).toBe(true);
   });
 
-  it('isolates remote URLs even when they name the app origin', async () => {
+  it('never loads a remote URL, even one that names the app origin', async () => {
     mocks.presentation.mode = 'reading';
     await render({ src: `${window.location.origin}/app` });
-    expect(element('iframe').getAttribute('sandbox')).toBe(
-      'allow-scripts allow-forms',
-    );
+    expect(element('iframe').hasAttribute('src')).toBe(false);
+    expect(mocks.getWebPage).not.toHaveBeenCalled();
   });
 
   it('resolves local HTML using the existing artifact API', async () => {
@@ -342,9 +363,7 @@ describe('WebNode reading presentation', () => {
     await render({ src: 'art_page.mhtml' });
     expect(element('iframe').getAttribute('sandbox')).toBe('');
     await render();
-    expect(element('iframe').getAttribute('sandbox')).toBe(
-      'allow-scripts allow-forms',
-    );
+    expect(element('iframe').hasAttribute('src')).toBe(false);
     expect(mocks.getWebPage).toHaveBeenCalledTimes(1);
   });
 

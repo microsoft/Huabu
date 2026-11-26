@@ -2,18 +2,31 @@
 // Licensed under the MIT license.
 
 import { ArrowUpRight, Globe } from 'lucide-react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { Spinner } from '@/components/Common/Spinner';
 import { PreviewHeaderButton } from '@/components/Nodes/PreviewHeaderButton';
+import {
+  canIsolatePages,
+  IsolatedPage,
+  isolatedPageUrl,
+} from '@/components/Nodes/web/IsolatedPage';
 import { normalizeSafeLinkHref } from '@/utils/safeLink';
 
 /** A bridge-free remote page, independent of node ingestion and artifacts. */
 export function UrlPreview({ url }: { url: string }) {
   const { t } = useTranslation();
   const href = normalizeSafeLinkHref(url);
+  // The address a frame finished loading, and whether a page view is loading.
+  const [framed, setFramed] = useState<string | null>(null);
+  const [pageLoading, setPageLoading] = useState(false);
   if (!href)
     return <div className="text-fg-subtle p-4">{t('node.invalidUrl')}</div>;
   const address = new URL(href);
+  // The desktop app shows another site's page in a view of its own.
+  const isolatedUrl = canIsolatePages() ? isolatedPageUrl(href) : null;
+  const loading = isolatedUrl ? pageLoading : framed !== href;
   const location = `${address.pathname === '/' ? '' : address.pathname}${address.search}${address.hash}`;
 
   return (
@@ -23,10 +36,14 @@ export function UrlPreview({ url }: { url: string }) {
           className="bg-bg-default flex h-7 min-w-0 flex-1 items-center gap-2 rounded-md px-2 text-xs"
           title={href}
         >
-          <Globe
-            className="text-fg-subtle size-3.5 shrink-0"
-            aria-hidden="true"
-          />
+          {loading ? (
+            <Spinner size="xs" className="text-fg-subtle" />
+          ) : (
+            <Globe
+              className="text-fg-subtle size-3.5 shrink-0"
+              aria-hidden="true"
+            />
+          )}
           <span className="min-w-0 truncate select-text" dir="ltr">
             <span className="text-fg-muted font-medium">{address.host}</span>
             <span className="text-fg-subtle">{location}</span>
@@ -41,14 +58,23 @@ export function UrlPreview({ url }: { url: string }) {
           <ArrowUpRight aria-hidden="true" />
         </PreviewHeaderButton>
       </div>
-      <iframe
-        key={href}
-        src={href}
-        title={href}
-        className="min-h-0 w-full flex-1 border-0"
-        sandbox="allow-scripts allow-forms"
-        referrerPolicy="no-referrer"
-      />
+      {isolatedUrl ? (
+        <IsolatedPage
+          key={isolatedUrl}
+          url={isolatedUrl}
+          onLoadingChange={setPageLoading}
+        />
+      ) : (
+        <iframe
+          key={href}
+          src={href}
+          title={href}
+          className="min-h-0 w-full flex-1 border-0"
+          sandbox="allow-scripts allow-forms"
+          referrerPolicy="no-referrer"
+          onLoad={() => setFramed(href)}
+        />
+      )}
     </div>
   );
 }
