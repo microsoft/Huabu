@@ -11,7 +11,7 @@ export const frameLayoutOrderSchema = z
   .refine((tracks) => {
     const ids = tracks.flat();
     return new Set(ids).size === ids.length;
-  }, 'A child can occur only once in layoutOrder.');
+  }, 'A child can occur only once in a Frame’s tracks.');
 export type FrameLayoutOrder = z.infer<typeof frameLayoutOrderSchema>;
 
 export const frameLayoutPlacementSchema = z.union([

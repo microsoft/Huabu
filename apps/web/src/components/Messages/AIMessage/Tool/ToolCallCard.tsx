@@ -115,6 +115,7 @@ export function ToolCallCard({ part, showIcon = false }: ToolCallCardProps) {
   // LAST text frame is the complete one, so collapse all text frames to
   // that single final frame; non-text blocks (diff/image/resource)
   // render individually.
+  const locationPaths = new Set((part.locations ?? []).map((loc) => loc.path));
   const renderedContent: React.ReactNode[] = [];
   let outputText: string | undefined;
   if (hasContent) {
@@ -128,6 +129,8 @@ export function ToolCallCard({ part, showIcon = false }: ToolCallCardProps) {
       if (wrap.type === 'content') {
         renderedContent.push(renderContentBlock(wrap.content, i));
       } else if (wrap.type === 'diff') {
+        // The locations list already names this file; do not show it twice.
+        if (locationPaths.has(wrap.path)) return;
         renderedContent.push(
           <div
             key={`diff-${i}`}

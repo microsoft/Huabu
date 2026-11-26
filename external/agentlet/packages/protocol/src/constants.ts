@@ -1,10 +1,10 @@
 /** Protocol version */
-export const PROTOCOL_VERSION = '1.0.0'
+export const PROTOCOL_VERSION = '1.0.0';
 
 /** Agentlet → Server method names */
 export const AgentletMethods = {
   HELLO: 'agentlet/hello',
-} as const
+} as const;
 
 /** Agent → Server method names */
 export const AgentMethods = {
@@ -15,7 +15,7 @@ export const AgentMethods = {
   OVERFLOW: 'agent/overflow',
   SUSPENDED: 'agent/suspended',
   PONG: 'agent/pong',
-} as const
+} as const;
 
 /** Server → Agent method names */
 export const ServerMethods = {
@@ -27,7 +27,7 @@ export const ServerMethods = {
   LIST: 'server/list',
   SEND_RESOURCE: 'server/sendResource',
   DISCOVER_HARNESSES: 'server/discoverHarnesses',
-} as const
+} as const;
 
 /** Error codes used in agent/hello rejection */
 export const ErrorCodes = {
@@ -37,7 +37,7 @@ export const ErrorCodes = {
   DUPLICATE_SESSION: -32004,
   INVALID_REQUEST: -32600,
   PARSE_ERROR: -32700,
-} as const
+} as const;
 
 /** Daemon-owned coordinates and credentials; never session/bootstrap overrides. */
-export const DAEMON_ENV_KEYS = ['AGENTLET_SERVER', 'AGENTLET_TOKEN'] as const
+export const DAEMON_ENV_KEYS = ['AGENTLET_SERVER', 'AGENTLET_TOKEN'] as const;

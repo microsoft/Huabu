@@ -4,16 +4,24 @@
 import { expect, it } from 'vitest';
 
 import { agentCanvasCommandSchema } from '../../types/api/space-operations.js';
-import { executeCanvasCommands } from '../index.js';
+import {
+  executeCanvasCommands,
+  readPaintKey,
+  seedNodeOrder,
+} from '../index.js';
 
 import type { CanvasNode } from '../interfaces.js';
 
-const pdf: CanvasNode = {
-  id: 'pdf',
-  type: 'pdf',
-  position: { x: 0, y: 0 },
-  data: { label: 'Paper', coverUrl: 'old.png' },
-};
+// A stored Space is read with its paint keys already in place.
+const [pdf] = seedNodeOrder<CanvasNode>([
+  {
+    id: 'pdf',
+    type: 'pdf',
+    position: { x: 0, y: 0 },
+    data: { label: 'Paper', coverUrl: 'old.png' },
+  },
+]);
+const paintKey = readPaintKey(pdf);
 
 function merge(patch: Record<string, unknown>) {
   return executeCanvasCommands(
@@ -34,8 +42,9 @@ it('replaces a cover and removes it on null, leaving other data intact', () => {
   expect(merge({ coverUrl: 'new.png' })).toEqual({
     label: 'Paper',
     coverUrl: 'new.png',
+    paintKey,
   });
-  expect(merge({ coverUrl: null })).toEqual({ label: 'Paper' });
+  expect(merge({ coverUrl: null })).toEqual({ label: 'Paper', paintKey });
 });
 
 it('accepts a string or null cover in the agent command contract', () => {

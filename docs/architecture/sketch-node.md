@@ -35,7 +35,7 @@ No explicit trigger is needed.
 | `question` / `image` / `video` / `frame` | metadata                                                       | ✅ frontmatter-only    | same as sketch, sidecar only                                                                                          |
 | `note` / `text` / `web` / `pdf`          | metadata                                                       | ✅                     | text types also carry a markdown body                                                                                 |
 
-`MD_BACKED_NODE_TYPES` whitelist: [canvas.route.ts](../../apps/server/src/modules/canvas/canvas.route.ts). Footprint: ~0.5–3 KB per stroke, negligible for `space.json`.
+`MD_BACKED_NODE_TYPES` whitelist: [nodeContentFields.ts](../../packages/shared/src/canvas-engine/nodeContentFields.ts), shared by the page and the server. Footprint: ~0.5–3 KB per stroke, negligible for `space.json`.
 
 Types:
 
@@ -248,4 +248,4 @@ Selected labels/highlights join the synchronous grounding freeze even for an Ink
 | Cross-region intent           | [apps/web/src/handler/canvasCommand/resolvers/resolveMoveSketchStrokesToRegion.ts](../../apps/web/src/handler/canvasCommand/resolvers/resolveMoveSketchStrokesToRegion.ts)                                                                                                                                               |
 | Snapshot for AI               | [apps/server/src/modules/agent/tools/handlers/snapshot-node.ts](../../apps/server/src/modules/agent/tools/handlers/snapshot-node.ts)                                                                                                                                                                                     |
 | Screenshot                    | [apps/web/src/handler/canvasCommand/utils/screenshot.ts](../../apps/web/src/handler/canvasCommand/utils/screenshot.ts)                                                                                                                                                                                                   |
-| Persistence whitelist         | [apps/server/src/modules/canvas/canvas.route.ts](../../apps/server/src/modules/canvas/canvas.route.ts) `MD_BACKED_NODE_TYPES`                                                                                                                                                                                            |
+| Persistence whitelist         | [packages/shared/src/canvas-engine/nodeContentFields.ts](../../packages/shared/src/canvas-engine/nodeContentFields.ts) `MD_BACKED_NODE_TYPES`                                                                                                                                                                            |

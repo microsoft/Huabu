@@ -198,14 +198,50 @@ export function translateOf(transform: string): Point {
   return { x: Number(match[1]), y: Number(match[2]) };
 }
 
-/** A plain command list as edits: one edit per command (a failing command does not undo the others). */
+/**
+ * A title a fixture gives a node it creates is that person's title.
+ *
+ * Every command these helpers wrap is posted to `/api/canvas/:id/execute`,
+ * which is a person's write. A page states `labelSource: 'user'` for a title
+ * a person gave; a created node that carries a title and no `labelSource` is
+ * read by the server as carrying a placeholder, and a `note` or `text` is then
+ * named after its body. So a `CREATE_NODES` node with a non-empty `data.label`
+ * and no `data.labelSource` gets `labelSource: 'user'` here. A fixture that
+ * wants the server to name the node leaves the title out, or states the
+ * `labelSource` it means.
+ */
+function withPersonTitles<T>(command: T): T {
+  const create = command as { type?: unknown; nodes?: unknown };
+  if (create.type !== 'CREATE_NODES' || !Array.isArray(create.nodes))
+    return command;
+  return {
+    ...command,
+    nodes: create.nodes.map((node: { data?: Record<string, unknown> }) => {
+      const data = node?.data;
+      if (
+        !data ||
+        typeof data.label !== 'string' ||
+        data.label.trim().length === 0 ||
+        data.labelSource !== undefined
+      )
+        return node;
+      return { ...node, data: { ...data, labelSource: 'user' } };
+    }),
+  };
+}
+
+/**
+ * A person's command list as edits: one edit per command (a failing command
+ * does not undo the others). A created node's title is the person's
+ * (`withPersonTitles`).
+ */
 export function editsPerCommand<T>(
   commands: readonly T[],
   basis?: string,
 ): { basis?: string; commands: T[] }[] {
   return commands.map((command) => ({
     ...(basis !== undefined ? { basis } : {}),
-    commands: [command],
+    commands: [withPersonTitles(command)],
   }));
 }
 

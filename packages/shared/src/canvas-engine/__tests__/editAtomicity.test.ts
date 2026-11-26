@@ -12,6 +12,7 @@ import {
   createReadVersionAdmission,
   executeCanvasCommands,
   executeCanvasEdits,
+  seedNodeOrder,
 } from '../index.js';
 
 import type { CanvasCommand, CanvasEdit } from '../../types/canvas/index.js';
@@ -72,7 +73,9 @@ const start = (): CanvasNode[] => [
   note('child', 20, 'f'),
 ];
 
-function run(edits: CanvasEdit[], nodes = start()) {
+function run(edits: CanvasEdit[], startNodes = start()) {
+  // A stored Space is read with its paint keys already in place.
+  const nodes = seedNodeOrder(startNodes);
   const out = executeCanvasEdits(
     { source: 'agent', edits },
     { nodes, edges: [], canvasId: 'c1' },

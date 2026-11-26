@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 
 import { EDGE_LABEL_MAX_INVERSE_SCALE } from '../../../types/canvas/edge.js';
 import { executeCanvasCommands } from '../../executor.js';
+import { seedNodeOrder } from '../../seedOrder.js';
 import {
   applyColumnLayout,
   applyGridLayout,
@@ -219,11 +220,11 @@ describe('structured edge gutters', () => {
     // affected would only put it through the end-of-batch fit pass —
     // turning an edge restyle into a frame resize that saves, broadcasts
     // and shares the restyle's undo step.
-    const nodes = [
+    const nodes = seedNodeOrder([
       { ...frame(), data: { layoutMode: 'free', sizing: 'hug' } } as Node,
       child('a', {}, { x: 40, y: 40 }),
       child('b', {}, { x: 400, y: 300 }),
-    ];
+    ]);
     const edge = { id: 'edge-ab', source: 'a', target: 'b' } as Edge;
 
     const { writeResult } = executeCanvasCommands(

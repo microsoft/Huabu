@@ -19,9 +19,12 @@ import {
   executeCanvasCommands,
   admitSiblingReorder,
   assignNodeZIndices,
-  applyOrderedDeltas,
+  applyDeltas,
   diffCanvasState,
   invertDeltas,
+  readPaintKey,
+  seedNodeOrder,
+  withMasonryLayoutOrder,
   solveStructuredFrameLayout,
 } from '../index.js';
 
@@ -47,6 +50,19 @@ function run(commands: unknown[], startNodes: CanvasNode[]) {
     { source: 'ui', commands: commands as CanvasCommand[] },
     { nodes: startNodes, edges: [] as CanvasEdge[], canvasId: 'c1' },
   ).writeResult.nodes;
+}
+
+/**
+ * Replay deltas onto a state. Applying the rows orders siblings by their
+ * paint keys and lays the array out as the rendered forest, the form the
+ * executor's own output has.
+ */
+function replay(
+  state: { nodes: CanvasNode[]; edges: CanvasEdge[] },
+  deltas: Parameters<typeof applyDeltas>[1],
+) {
+  const { nodes, edges } = applyDeltas(state, deltas);
+  return { nodes, edges };
 }
 
 function indexOfId(nodes: CanvasNode[], id: string): number {
@@ -79,13 +95,13 @@ describe('executeCanvasCommands: tree-order invariant', () => {
       node(id, 'note', { parentId, zIndex: -1 });
 
     it('moves a Frame subtree as one band without changing descendant sibling order', () => {
-      const start = [
+      const start = seedNodeOrder([
         frame('f'),
         child('f1', 'f'),
         frame('g'),
         child('g1', 'g'),
         node('a'),
-      ];
+      ]);
       const out = run(
         [{ type: 'REORDER_NODES', nodeIds: ['f'], to: 'top' }],
         start,
@@ -95,9 +111,18 @@ describe('executeCanvasCommands: tree-order invariant', () => {
       expect(out.find((n) => n.id === 'f1')).toBe(start[1]);
       const before = { nodes: start, edges: [] };
       const after = { nodes: out, edges: [] };
-      const deltas = diffCanvasState(before, after, { orderVersion: 1 });
-      expect(applyOrderedDeltas(before, deltas)).toEqual(after);
-      expect(applyOrderedDeltas(after, invertDeltas(deltas))).toEqual(before);
+      const deltas = diffCanvasState(before, after);
+      // Only the moved Frame is rewritten, and only its paint key.
+      expect(deltas).toEqual([
+        {
+          type: 'REPLACE_NODE',
+          nodeType: 'frame',
+          prev: { id: 'f', data: { paintKey: readPaintKey(start[0]) } },
+          next: { id: 'f', data: { paintKey: readPaintKey(out[3]) } },
+        },
+      ]);
+      expect(replay(before, deltas)).toEqual(after);
+      expect(replay(after, invertDeltas(deltas))).toEqual(before);
     });
 
     it('keeps group order from the live siblings, not the request', () => {
@@ -179,11 +204,9 @@ describe('executeCanvasCommands: tree-order invariant', () => {
         reason: 'no-op',
       });
       expect(output.writeResult.snapshotNeeded).toBe(false);
-      expect(
-        diffCanvasState({ nodes, edges: [] }, output.writeResult, {
-          orderVersion: 2,
-        }),
-      ).toEqual([]);
+      expect(diffCanvasState({ nodes, edges: [] }, output.writeResult)).toEqual(
+        [],
+      );
     });
 
     it('serializes consecutive insertions after the same live anchor', () => {
@@ -204,14 +227,14 @@ describe('executeCanvasCommands: tree-order invariant', () => {
     });
 
     it('reparents and orders in one replay/inverse without changing nested world geometry', () => {
-      const nodes = [
+      const nodes = seedNodeOrder([
         frame('f'),
         frame('nested', 'f'),
         child('inside', 'nested'),
         frame('g'),
         child('target', 'g'),
         node('root'),
-      ];
+      ]);
       const out = run(
         [
           { type: 'SET_NODE_PARENT', nodeIds: ['nested'], parentId: 'g' },
@@ -225,9 +248,11 @@ describe('executeCanvasCommands: tree-order invariant', () => {
       );
       const before = { nodes, edges: [] };
       const after = { nodes: out, edges: [] };
-      const deltas = diffCanvasState(before, after, { orderVersion: 2 });
-      expect(applyOrderedDeltas(before, deltas)).toEqual(after);
-      expect(applyOrderedDeltas(after, invertDeltas(deltas))).toEqual(before);
+      const deltas = diffCanvasState(before, after);
+      // The reparented Frame is the only node rewritten.
+      expect(deltas.map((delta) => delta.type)).toEqual(['REPLACE_NODE']);
+      expect(replay(before, deltas)).toEqual(after);
+      expect(replay(after, invertDeltas(deltas))).toEqual(before);
       expect(out.find((n) => n.id === 'inside')).toBe(nodes[2]);
       expect(out.map((n) => n.id)).toEqual([
         'f',
@@ -242,31 +267,43 @@ describe('executeCanvasCommands: tree-order invariant', () => {
     it.each(['column', 'row', 'grid'])(
       'keeps %s reading geometry and cells independent from paint order',
       (layoutMode) => {
-        const nodes = [
-          {
-            ...frame('f'),
-            data: { sizing: 'manual', layoutMode, gridCount: 1 },
-          },
-          {
-            ...child('a', 'f'),
-            position: { x: 30, y: 80 },
-            data: { frameColumn: 0, frameRow: 0 },
-            style: { width: 100, height: 100 },
-          },
-          {
-            ...child('b', 'f'),
-            position: { x: 180, y: 230 },
-            data: { frameColumn: 0, frameRow: 1 },
-            style: { width: 100, height: 100 },
-          },
-        ];
+        // As a stored Space is read: paint keys in place, and a Column / Row
+        // Frame's children already holding their reading order.
+        const nodes = withMasonryLayoutOrder(
+          seedNodeOrder([
+            {
+              ...frame('f'),
+              data: { sizing: 'manual', layoutMode, gridCount: 1 },
+            },
+            {
+              ...child('a', 'f'),
+              position: { x: 30, y: 80 },
+              data: { frameColumn: 0, frameRow: 0 },
+              style: { width: 100, height: 100 },
+            },
+            {
+              ...child('b', 'f'),
+              position: { x: 180, y: 230 },
+              data: { frameColumn: 0, frameRow: 1 },
+              style: { width: 100, height: 100 },
+            },
+          ]),
+          'f',
+        );
         const beforeLayout = solveStructuredFrameLayout(nodes, 'f');
         const out = run(
           [{ type: 'REORDER_NODES', nodeIds: ['a'], to: 'top' }],
           nodes,
         );
         expect(out.map((n) => n.id)).toEqual(['f', 'b', 'a']);
-        expect(out.find((n) => n.id === 'a')).toBe(nodes[1]);
+        // The moved child changes in its paint key and nothing else; the
+        // sibling it passed is not rewritten at all.
+        const moved = out.find((n) => n.id === 'a') as CanvasNode;
+        expect(readPaintKey(moved)).not.toBe(readPaintKey(nodes[1]));
+        expect(moved).toEqual({
+          ...nodes[1],
+          data: { ...nodes[1].data, paintKey: readPaintKey(moved) },
+        });
         expect(out.find((n) => n.id === 'b')).toBe(nodes[2]);
         const afterLayout = solveStructuredFrameLayout(out, 'f');
         expect(afterLayout).toEqual(beforeLayout);

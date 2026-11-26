@@ -11,7 +11,7 @@ import {
   getArtifactQuerySchema,
 } from '@huabu/shared';
 
-import { sandboxForRestrictedCaller, sendBlob } from './send-blob.js';
+import { sandboxStoredDocument, sendBlob } from './send-blob.js';
 import { toSafeFilename } from '../../utils/naming.js';
 import { space } from '../storage/index.js';
 import { extractHtmlFromMhtml, injectBaseHref } from '../web/mhtml.js';
@@ -177,7 +177,7 @@ const artifactRoute: FastifyPluginAsync = async (fastify) => {
       const html = extracted.sourceUrl
         ? injectBaseHref(extracted.html, extracted.sourceUrl)
         : extracted.html;
-      sandboxForRestrictedCaller(request, reply);
+      sandboxStoredDocument(request, reply);
       return (
         reply
           .header('Content-Type', 'text/html; charset=utf-8')

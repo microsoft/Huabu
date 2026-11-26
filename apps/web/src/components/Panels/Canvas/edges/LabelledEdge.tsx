@@ -27,6 +27,7 @@ import { measureTextContent } from '@/utils/node/textMeasure';
 
 import { getEdgeAccent } from './edgeAccent';
 import { getEdgeLabelRenderZ } from './edgeZ';
+import { useStepEdgeRoute } from './StepEdgeRoutingContext';
 
 import type { CanvasEdgeId, EdgeStyle } from '@huabu/shared';
 import type { EdgeProps } from '@xyflow/react';
@@ -74,17 +75,20 @@ export function LabelledEdge(props: EdgeProps) {
 
   const edgeStyle = getEdgeStyle(data);
   const frameInternal = useFrameInternalEdge(props.source, props.target);
-  const [edgePath, labelX, labelY] = getEdgePath(
-    {
-      sourceX,
-      sourceY,
-      targetX,
-      targetY,
-      sourcePosition,
-      targetPosition,
-    },
-    getEdgeLineType(data, props.type),
-  );
+  const stepRoute = useStepEdgeRoute(props);
+  const [edgePath, labelX, labelY] = stepRoute
+    ? [stepRoute.path, stepRoute.labelX, stepRoute.labelY]
+    : getEdgePath(
+        {
+          sourceX,
+          sourceY,
+          targetX,
+          targetY,
+          sourcePosition,
+          targetPosition,
+        },
+        getEdgeLineType(data, props.type),
+      );
 
   // ── Arrow rendering ────────────────────────────────────────────────
   //

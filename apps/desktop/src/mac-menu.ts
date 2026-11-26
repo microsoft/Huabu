@@ -389,10 +389,17 @@ export function applyApplicationMenu(
  */
 export function registerMenuIpc(
   resolveMainWindow: () => BrowserWindow | null,
+  assertSender: (event: Electron.IpcMainEvent) => void,
 ): void {
   getMainWindow = resolveMainWindow;
-  ipcMain.on('menu:configure', (_event, raw: unknown) => {
+  ipcMain.on('menu:configure', (event, raw: unknown) => {
     if (process.platform !== 'darwin') return;
+    try {
+      assertSender(event);
+    } catch (error) {
+      console.error('[desktop] menu:configure:', error);
+      return;
+    }
     Menu.setApplicationMenu(buildMacMenu(normalizeMenuConfig(raw)));
   });
 }

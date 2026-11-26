@@ -142,8 +142,13 @@ describe('Interactive View RFS resources', () => {
       });
       expect(renderer.statusCode).toBe(200);
       expect(renderer.body).toContain('<title>Issue Tracker</title>');
-      expect(renderer.headers['content-security-policy']).toContain(
-        "connect-src 'none'",
+      // The renderer's own policy, and the sandbox every stored document
+      // is served with.
+      const policies = [renderer.headers['content-security-policy']].flat();
+      expect(policies).toHaveLength(2);
+      expect(policies[0]).toContain("connect-src 'none'");
+      expect(policies[1]).toBe(
+        'sandbox allow-scripts allow-forms allow-popups',
       );
 
       const list = await app.inject({

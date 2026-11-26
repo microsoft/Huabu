@@ -38,7 +38,10 @@ import useCanvasStore, {
 } from './canvasStore';
 import { CANVAS_PAGE_ID } from './canvasStore/sync/pageId';
 import { contentRevisionsOf } from './canvasStore/sync/testing/contentRevisions';
-import { createFakeSpaceServer } from './canvasStore/sync/testing/fakeExecuteServer';
+import {
+  createFakeSpaceServer,
+  seedStoredNodes,
+} from './canvasStore/sync/testing/fakeExecuteServer';
 
 import type * as apiModule from '../api';
 import type * as canvasApiModule from '../api/canvas';
@@ -86,7 +89,11 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
   resetCanvasSyncForTests();
-  const nodes = [{ ...note(X, 0), selected: true }, note(Y, 400)];
+  // As loaded from the server: every node has its paint key.
+  const nodes = seedStoredNodes([
+    { ...note(X, 0), selected: true },
+    note(Y, 400),
+  ]);
   canvasHistoryManager.activate(SPACE, true);
   state()._setStateRaw({
     canvasId: SPACE,
@@ -298,7 +305,6 @@ describe('a body typed on this page while an update for another node arrives', (
         deferredFitFrameIds: [],
       } as never,
       undefined,
-      undefined,
       { source: 'ui' },
     );
     expect(node(X).position).toEqual({ x: 400, y: 300 });
@@ -334,7 +340,9 @@ describe('properties another page saved', () => {
   let cases = 0;
   beforeEach(() => {
     Z = `node-content-z${++cases}`;
-    state()._setStateRaw({ nodes: [...state().nodes, note(Z, 800)] });
+    state()._setStateRaw({
+      nodes: seedStoredNodes([...state().nodes, note(Z, 800)]),
+    });
   });
 
   it('are shown with their display order, without a save or an undo entry', async () => {
@@ -532,7 +540,6 @@ describe('the revision of a node whose stored body the page does not show', () =
           deferredFitFrameIds: [],
         } as never,
         undefined,
-        undefined,
         { source: 'ui' },
       );
     }
@@ -579,7 +586,7 @@ describe("an agent's write to a PDF's properties and cover", () => {
       style: { width: 300, height: 400 },
       data: { type: 'pdf', label: 'Paper', src: 'paper.pdf' },
     };
-    state()._setStateRaw({ nodes: [...state().nodes, pdf] });
+    state()._setStateRaw({ nodes: seedStoredNodes([...state().nodes, pdf]) });
     // The server's copy carries the extracted text the page does not show.
     const stored = {
       ...pdf,
@@ -603,7 +610,6 @@ describe("an agent's write to a PDF's properties and cover", () => {
         contentEditedNodeIds: [],
         deferredFitFrameIds: [],
       } as never,
-      undefined,
       undefined,
       {
         source: 'agent',
@@ -650,7 +656,6 @@ describe("an agent's write to a PDF's properties and cover", () => {
         deferredFitFrameIds: [],
       } as never,
       undefined,
-      undefined,
       { source: 'agent' },
     );
     expect(node(PDF).data).not.toHaveProperty('coverUrl');
@@ -685,7 +690,6 @@ describe("the revision an update brings for a node's content", () => {
       [{ type: 'REPLACE_NODE', prev, next }] as never,
       state().version + 1,
       noEffects,
-      undefined,
       undefined,
       {
         source: 'agent',
@@ -867,7 +871,6 @@ describe("the revision an update brings for a node's content", () => {
       [{ type: 'REPLACE_NODE', prev, next }] as never,
       state().version + 1,
       noEffects,
-      undefined,
       undefined,
       { source: 'agent', nodeContentRevisions: { [id]: options.rev } },
     );
@@ -1072,7 +1075,6 @@ describe('a node frozen by a content conflict the user has not answered', () => 
       version + 1,
       noEffects,
       undefined,
-      undefined,
       { source, ...(nodeContentRevisions ? { nodeContentRevisions } : {}) },
     );
   }
@@ -1238,7 +1240,6 @@ describe('a node frozen by a content conflict the user has not answered', () => 
       state().version + 1,
       noEffects,
       undefined,
-      undefined,
       { source: 'agent', nodeContentRevisions: { [Y]: 'stored-agent-rev' } },
     );
     expect(skipped).toEqual([Y]);
@@ -1268,7 +1269,6 @@ describe('a node frozen by a content conflict the user has not answered', () => 
       [{ type: 'REPLACE_NODE', prev: server, next }] as never,
       state().version + 1,
       noEffects,
-      undefined,
       undefined,
       { source: 'agent' },
     );

@@ -30,9 +30,7 @@ import {
   nodeFieldChanges,
   TRANSIENT_NODE_FIELDS,
   type Delta,
-  type OrderedDelta,
 } from './delta.js';
-import { diffSiblingOrderEvents } from './siblingOrder.js';
 
 export { TRANSIENT_NODE_FIELDS };
 
@@ -56,29 +54,18 @@ export function stripTransientEdgeFields<T extends object>(edge: T): T {
 }
 
 /**
- * Compute entity deltas; passing orderVersion opts into complete sibling lists.
- * The two-argument legacy contract deliberately remains entity-only until its
- * filtered broadcast and per-entity Review consumers support atomic order replay.
+ * Compute the entity deltas that turn `prev` into `next`.
  *
- * Output ordering: deletes first, then inserts, then replaces. This
- * Ordered output appends sibling events. Apply the whole batch, not individual
- * rows; replay materializes the rendered forest rather than legacy interleaving.
+ * Paint order needs no row of its own: it is the node field
+ * `data.paintKey`, so a reorder is a `REPLACE_NODE` of the moved node.
+ *
+ * Output ordering: deletes first, then inserts, then replaces.
  */
 export function diffCanvasState(
   prev: { nodes: readonly CanvasNode[]; edges: readonly CanvasEdge[] },
   next: { nodes: readonly CanvasNode[]; edges: readonly CanvasEdge[] },
-  options: { orderVersion: number },
-): OrderedDelta[];
-export function diffCanvasState(
-  prev: { nodes: readonly CanvasNode[]; edges: readonly CanvasEdge[] },
-  next: { nodes: readonly CanvasNode[]; edges: readonly CanvasEdge[] },
-): Delta[];
-export function diffCanvasState(
-  prev: { nodes: readonly CanvasNode[]; edges: readonly CanvasEdge[] },
-  next: { nodes: readonly CanvasNode[]; edges: readonly CanvasEdge[] },
-  options?: { orderVersion: number },
-): OrderedDelta[] {
-  const out: OrderedDelta[] = [];
+): Delta[] {
+  const out: Delta[] = [];
 
   const prevNodeMap = new Map<string, CanvasNode>(
     prev.nodes.map((n) => [n.id, n]),
@@ -137,11 +124,6 @@ export function diffCanvasState(
     out.push({ type: 'REPLACE_EDGE', prev: prevEdge, next: nextEdge });
   }
 
-  if (options) {
-    out.push(
-      ...diffSiblingOrderEvents(prev.nodes, next.nodes, options.orderVersion),
-    );
-  }
   return out;
 }
 

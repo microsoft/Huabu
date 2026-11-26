@@ -7,7 +7,7 @@ import { dedupeName, toSafeFilename } from '../../utils/naming.js';
 import {
   applyDeltasOnServerAlreadyLocked,
   hydrateCanvasNodes,
-  toWirePendingEffects,
+  canvasUpdateOf,
 } from '../canvas/canvas-executor.js';
 import { publishCanvasUpdate } from '../canvas/canvas-sync.js';
 import { withCanvasMutex } from '../canvas/write-coordinator.js';
@@ -117,19 +117,10 @@ export const conversationTitleNodeStore = {
         agentNodeProjection: true,
       });
       if (output.toVersion > output.fromVersion)
-        publishCanvasUpdate(canvasId, {
-          type: 'update',
-          data: {
-            fromVersion: output.fromVersion,
-            toVersion: output.toVersion,
-            deltas: output.deltas,
-            pendingEffects: toWirePendingEffects(output.pendingEffects),
-            ...(output.nodeContentRevisions
-              ? { nodeContentRevisions: output.nodeContentRevisions }
-              : {}),
-            agentNodeProjection: true,
-          },
-        });
+        publishCanvasUpdate(
+          canvasId,
+          canvasUpdateOf(output, { agentNodeProjection: true }),
+        );
       return true;
     };
     return alreadyLocked ? write() : withCanvasMutex(canvasId, write);

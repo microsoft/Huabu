@@ -10,7 +10,7 @@ import {
 import {
   applyDeltasOnServerAlreadyLocked,
   hydrateCanvasNodes,
-  toWirePendingEffects,
+  canvasUpdateOf,
 } from './canvas-executor.js';
 import { publishCanvasUpdate } from './canvas-sync.js';
 import { withCanvasMutex } from './write-coordinator.js';
@@ -99,19 +99,10 @@ export async function projectAgentNodeStateAlreadyLocked(
     agentNodeProjection: true,
   });
   if (output.toVersion > output.fromVersion) {
-    publishCanvasUpdate(canvasId, {
-      type: 'update',
-      data: {
-        fromVersion: output.fromVersion,
-        toVersion: output.toVersion,
-        deltas: output.deltas,
-        pendingEffects: toWirePendingEffects(output.pendingEffects),
-        ...(output.nodeContentRevisions
-          ? { nodeContentRevisions: output.nodeContentRevisions }
-          : {}),
-        agentNodeProjection: true,
-      },
-    });
+    publishCanvasUpdate(
+      canvasId,
+      canvasUpdateOf(output, { agentNodeProjection: true }),
+    );
   }
   return true;
 }

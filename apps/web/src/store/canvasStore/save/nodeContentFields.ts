@@ -2,37 +2,23 @@
 // Licensed under the MIT license.
 
 /**
- * Shared constants describing which node fields participate in the
- * per-node markdown sidecar pipeline. Imported by both:
- *
- *   • the store's send queue — to *exclude* these fields from the
- *     structure commands it sends (content edits must not bump
- *     `canvas.version`).
- *   • the future `nodeContentQueue` extraction — to *include* them
- *     in the per-node `PUT /api/canvas/:id/nodes/:nodeId/content`
- *     body and decide which nodes own a `.md` sidecar.
- *
- * Keep in sync with the server-side `MD_BACKED_NODE_TYPES` /
- * `putNodeContentBodySchema`. See `docs/architecture/canvas-realtime-sync.md`.
+ * The page's view of node content: how the content fields divide between
+ * the body's save, the title and the custom properties. Which fields are
+ * content at all, and which node types have a content record, is the same
+ * on the server and comes from `@huabu/shared/canvas-engine`. See
+ * `docs/architecture/canvas-realtime-sync.md`.
  */
 
-/**
- * `data` keys whose values live in the per-node markdown sidecar
- * (`nodes/<safe(label)>.md`), not in structural state. A patch touching
- * any of these schedules a per-node content save and the key is
- * left out of the structure commands the page sends.
- */
-export const NODE_CONTENT_KEYS: ReadonlySet<string> = new Set([
-  'content',
-  'label',
-  'labelSource',
-  'src',
-  'summary',
-  'keywords',
-  'provenance',
-  'properties',
-  'propertyDisplayKeys',
-]);
+import {
+  CONTENT_REVISION_KEYS,
+  NODE_CONTENT_KEYS,
+} from '@huabu/shared/canvas-engine';
+
+export {
+  MD_BACKED_NODE_TYPES,
+  NODE_CONTENT_KEYS,
+  TEXT_BEARING_NODE_TYPES,
+} from '@huabu/shared/canvas-engine';
 
 /**
  * The content keys that hold a node's custom properties. No revision covers
@@ -51,10 +37,9 @@ export const TITLE_CONTENT_KEYS: ReadonlySet<string> = new Set([
 ]);
 
 /** The body's fields: the ones a node's content revision covers. */
-export const BODY_CONTENT_KEYS: ReadonlySet<string> = new Set([
-  'content',
-  'src',
-]);
+export const BODY_CONTENT_KEYS: ReadonlySet<string> = new Set(
+  CONTENT_REVISION_KEYS,
+);
 
 /**
  * The content field a property unit belongs to (see `sync/propertyUnits.ts`):
@@ -71,58 +56,6 @@ export function contentFieldOfUnit(
     return { field: 'properties', propertyKey: rest.slice(11) };
   return null;
 }
-
-/**
- * Node types that own a markdown sidecar. Mirrors the server-side
- * `MD_BACKED_NODE_TYPES`. Patches to nodes whose type is not in this
- * set still update the in-memory store but do not schedule a content
- * save (there is no `.md` to write).
- *
- * `question` is included as a frontmatter-only sidecar (no body) so
- * its auto-generated label / labelSource survive canvas reloads —
- * without this, `patchNodeSilent({label, labelSource})` would only
- * live in memory because structure commands leave both fields out.
- *
- * `sketch` is included for the same reason as `question`: the canvas
- * engine auto-stamps a `Sketch N` label on creation (and the user can
- * rename it from the layer panel) but structure commands leave out
- * `label` / `labelSource`. Without a sidecar those fields would only
- * live in memory and the layer panel would show a blank row after
- * reload. The sidecar is frontmatter-only — stroke geometry stays
- * inline in structural state.
- */
-export const MD_BACKED_NODE_TYPES: ReadonlySet<string> = new Set([
-  'fileReference',
-  'note',
-  'text',
-  'web',
-  'pdf',
-  'office',
-  'image',
-  'video',
-  'audio',
-  'frame',
-  'question',
-  'sketch',
-]);
-
-/**
- * Subset of {@link MD_BACKED_NODE_TYPES} that carry a `content` field
- * (free-form markdown body). The other md-backed types still have
- * label / src / etc. but no body text.
- *
- * `question` is in here: its prompt lives at `data.content` exactly
- * like a note / text body, so a single rule handles persistence and
- * canvas search picks it up for free.
- */
-export const TEXT_BEARING_NODE_TYPES: ReadonlySet<string> = new Set([
-  'note',
-  'text',
-  'web',
-  'pdf',
-  'office',
-  'question',
-]);
 
 /** `data` with `patch` laid over it; a key patched to `undefined` is removed. */
 export function withContentPatch(

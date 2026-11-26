@@ -17,7 +17,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-import archiver from 'archiver';
+import { ZipArchive } from 'archiver';
 import { build } from 'tsup';
 import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
@@ -221,7 +221,7 @@ describe('server bundle runtime', () => {
           return;
         }
         if (request.url === '/rfs/space/download/services/image-gen.zip') {
-          const archive = archiver('zip');
+          const archive = new ZipArchive();
           archive.on('error', (error) => response.destroy(error));
           archive.append('id: image-gen', { name: 'image-gen/service.yaml' });
           archive.append('# Package Skill', { name: 'image-gen/SKILL.md' });

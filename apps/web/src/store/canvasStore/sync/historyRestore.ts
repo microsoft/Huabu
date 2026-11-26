@@ -13,6 +13,11 @@
  * Pure functions only.
  */
 
+import {
+  orderByPaintKeys,
+  type NestableNode,
+} from '@huabu/shared/canvas-engine';
+
 import { EXISTENCE_UNIT, parseKey } from './inFlight';
 import {
   applyUnits,
@@ -43,7 +48,6 @@ export function restoreChanged<N extends UnitNode, E extends RestoreEdge>(
   const order = current.nodes.map((node) => node.id);
   const edges = new Map(current.edges.map((edge) => [edge.id, edge]));
   const thenEdges = new Map(snapshot.edges.map((edge) => [edge.id, edge]));
-  const reordered: Array<string | null> = [];
 
   for (const key of changed) {
     const parsed = parseKey(key);
@@ -52,10 +56,6 @@ export function restoreChanged<N extends UnitNode, E extends RestoreEdge>(
       const edge = thenEdges.get(parsed.edgeId);
       if (edge) edges.set(edge.id, edge);
       else edges.delete(parsed.edgeId);
-      continue;
-    }
-    if (parsed.kind === 'order') {
-      reordered.push(parsed.parentId);
       continue;
     }
     const { nodeId, unit } = parsed;
@@ -87,32 +87,20 @@ export function restoreChanged<N extends UnitNode, E extends RestoreEdge>(
     }
   }
 
-  // Sibling order: put each restored parent's children back in the
-  // snapshot's order, in the slots they occupy now; children the snapshot
-  // does not know keep their place after them.
-  let ordered = order;
-  for (const parentId of reordered) {
-    const isChild = (id: string): boolean =>
-      ((nodes.get(id)?.parentId as string | undefined) ?? null) === parentId;
-    const wanted = snapshot.nodes
-      .map((node) => node.id)
-      .filter((id) => nodes.has(id) && isChild(id));
-    const wantedSet = new Set(wanted);
-    const present = ordered.filter(isChild);
-    const sequence = [...wanted, ...present.filter((id) => !wantedSet.has(id))];
-    let next = 0;
-    ordered = ordered.map((id) => (isChild(id) ? sequence[next++] : id));
-  }
-
   for (const [id, edge] of edges) {
     if (!nodes.has(edge.source) || !nodes.has(edge.target)) edges.delete(id);
   }
 
   return {
-    nodes: ordered.flatMap((id) => {
-      const node = nodes.get(id);
-      return node ? [node] : [];
-    }),
+    // Paint order is each node's own `data.paintKey`, restored above like
+    // any other unit; the array follows the keys. The store would order it
+    // on the way in, but the restore plan reads this array's order first.
+    nodes: orderByPaintKeys(
+      order.flatMap((id) => {
+        const node = nodes.get(id);
+        return node ? [node] : [];
+      }) as unknown as NestableNode[],
+    ) as unknown as N[],
     edges: [...edges.values()],
   };
 }

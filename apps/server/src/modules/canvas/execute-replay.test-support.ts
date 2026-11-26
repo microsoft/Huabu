@@ -48,7 +48,6 @@ export function expectReplayOf(
     'basis',
     'operationId',
     'runId',
-    'orderEvents',
     'nodeContentRevisions',
     'viewConflicts',
   ] as const) {

@@ -44,6 +44,7 @@ import {
   type PostCanvasExecuteResponse,
   type CanvasEdgeId,
   type CanvasNodeId,
+  type CanvasSyncEvent,
   type ExecuteConflict,
   type ExecuteOriginator,
   type InteractiveViewJsonValue,
@@ -52,8 +53,6 @@ import {
   applySharedPostEffectsFromWriteResult,
   applyDeltas,
   diffCanvasState,
-  diffSiblingOrderEvents,
-  SiblingOrderReplayError,
   createReadVersionAdmission,
   executeCanvasEdits,
   extractCanvasChanges,
@@ -64,6 +63,8 @@ import {
   mergeNodeFields,
   nodeRevision,
   nodeRevisionOf,
+  settlePaintOrder,
+  type NestableNode,
   preserveAgentNodeOwnedData,
   projectAgentNodeEditableData,
   replayAgentNodeEditableData,
@@ -71,12 +72,14 @@ import {
   slimDeltas,
   toWireDeltas,
   changesAgentNodePreparation,
+  MD_BACKED_NODE_TYPES,
+  NODE_CONTENT_KEYS,
+  TEXT_BEARING_NODE_TYPES,
   type CanvasChangeRecord,
   type CanvasEdge,
   type CanvasNode,
   type Delta,
   type ReadVersionAdmission,
-  type SetSiblingOrderEvent,
 } from '@huabu/shared/canvas-engine';
 
 import {
@@ -144,24 +147,6 @@ const EMPTY_CANVAS_IDS: ReadonlySet<string> = new Set<string>();
 
 const log = getLogger('canvas.executor');
 
-/**
- * Sibling order events for a commit's notification. The strict forest check
- * rejects legacy topology that loads still repair; such a commit sends none
- * and clients keep their entity-only replay.
- */
-function siblingOrderEventsFor(
-  prestateNodes: readonly CanvasNode[],
-  finalNodes: readonly CanvasNode[],
-  orderVersion: number,
-): SetSiblingOrderEvent[] {
-  try {
-    return diffSiblingOrderEvents(prestateNodes, finalNodes, orderVersion);
-  } catch (error) {
-    if (error instanceof SiblingOrderReplayError) return [];
-    throw error;
-  }
-}
-
 function insertedNodeIds(deltas: readonly Delta[]): Set<string> {
   return new Set(
     deltas.flatMap((delta) =>
@@ -169,50 +154,6 @@ function insertedNodeIds(deltas: readonly Delta[]): Set<string> {
     ),
   );
 }
-
-// ── Markdown-backed-node knowledge (mirrors canvas.route.ts) ─────────────
-//
-// Kept in sync with the equivalent sets in `canvas.route.ts`. Both files
-// are intentionally self-contained so an accidental import cycle
-// between the route and the executor cannot occur — when these sets
-// drift we have a single failing test (per-node content round-trip) that
-// surfaces the discrepancy. See `docs/architecture/canvas-storage.md`.
-
-const MD_BACKED_NODE_TYPES = new Set([
-  'fileReference',
-  'note',
-  'text',
-  'web',
-  'pdf',
-  'office',
-  'image',
-  'video',
-  'audio',
-  'frame',
-  'question',
-  'sketch',
-]);
-
-const TEXT_BEARING_NODE_TYPES = new Set([
-  'note',
-  'text',
-  'web',
-  'pdf',
-  'office',
-  'question',
-]);
-
-const NODE_CONTENT_KEYS = new Set([
-  'content',
-  'label',
-  'labelSource',
-  'src',
-  'summary',
-  'keywords',
-  'provenance',
-  'properties',
-  'propertyDisplayKeys',
-]);
 
 function stripNodesForCanvas(nodes: readonly CanvasNode[]): CanvasNode[] {
   return nodes.map((node) => {
@@ -1066,12 +1007,6 @@ export interface ExecuteOnServerOutput {
   conflicts?: ExecuteConflict[];
   viewConflicts?: InteractiveViewConflict[];
   /**
-   * Complete direct-child lists of every parent whose sibling paint order or
-   * membership this batch changed, stamped with `toVersion`. Entity `deltas`
-   * cannot express order; clients replay these after them.
-   */
-  orderEvents?: SetSiblingOrderEvent[];
-  /**
    * Stored content revision of every node whose saved content this batch
    * created or changed ({@link contentChangedNodeIds}), read back after the
    * commit. A response answered from a result record carries the revisions
@@ -1328,7 +1263,7 @@ export class CanvasNotFoundError extends Error {
 }
 
 /** Pending effects as they travel: the mutated nodes by id. */
-export function toWirePendingEffects(effects: {
+function toWirePendingEffects(effects: {
   mutatedNodes: readonly CanvasNode[];
   deletedNodeIds: readonly string[];
   contentEditedNodeIds: readonly string[];
@@ -1378,7 +1313,6 @@ export function toExecuteResponse(
         })),
     })),
     pendingEffects: outcome.pendingEffects,
-    ...(outcome.orderEvents ? { orderEvents: outcome.orderEvents } : {}),
     ...(outcome.nodeContentRevisions
       ? { nodeContentRevisions: outcome.nodeContentRevisions }
       : {}),
@@ -1390,23 +1324,53 @@ export function toExecuteResponse(
   };
 }
 
+type CanvasUpdateData = Extract<CanvasSyncEvent, { type: 'update' }>['data'];
+
+/** What a write to a Space left: the part of it an update carries. */
+type CanvasWrite = Pick<
+  ExecuteOnServerOutput,
+  | 'fromVersion'
+  | 'toVersion'
+  | 'deltas'
+  | 'pendingEffects'
+  | 'nodeContentRevisions'
+>;
+
+/**
+ * The update that takes a page from the version before a write to the one
+ * after it. Every writer builds its update here, so what an update carries
+ * is decided in one place; `about` adds what only that writer knows (who
+ * made the write, the request it answers, the review records it produced).
+ */
+export function canvasUpdateOf(
+  write: CanvasWrite,
+  about?: Omit<Partial<CanvasUpdateData>, keyof CanvasWrite>,
+): CanvasSyncEvent {
+  return {
+    type: 'update',
+    data: {
+      fromVersion: write.fromVersion,
+      toVersion: write.toVersion,
+      deltas: write.deltas,
+      pendingEffects: toWirePendingEffects(write.pendingEffects),
+      ...(write.nodeContentRevisions
+        ? { nodeContentRevisions: write.nodeContentRevisions }
+        : {}),
+      ...about,
+    },
+  };
+}
+
 /** Publish a system lifecycle batch after its related metadata has settled. */
 export function publishCanvasExecution(output: ExecuteOnServerOutput): void {
   if (output.toVersion === output.fromVersion) return;
-  publishCanvasUpdate(output.canvasId, {
-    type: 'update',
-    data: {
-      fromVersion: output.fromVersion,
-      toVersion: output.toVersion,
-      deltas: output.deltas,
-      pendingEffects: toWirePendingEffects(output.pendingEffects),
-      ...(output.orderEvents ? { orderEvents: output.orderEvents } : {}),
-      ...(output.nodeContentRevisions
-        ? { nodeContentRevisions: output.nodeContentRevisions }
-        : {}),
-      ...(output.operationId ? { operationId: output.operationId } : {}),
-    },
-  });
+  publishCanvasUpdate(
+    output.canvasId,
+    canvasUpdateOf(
+      output,
+      output.operationId ? { operationId: output.operationId } : undefined,
+    ),
+  );
 }
 
 /**
@@ -2074,8 +2038,8 @@ async function executePreparedOnServerAlreadyLocked(
   // leaving the agent with `applied: true` while persisted topology
   // is unchanged.
   //
-  // The delta log stays entity-only; the order itself travels to clients
-  // as `orderEvents` on the response and the sync notification below.
+  // Paint order itself is a node field (`data.paintKey`) and shows up as a
+  // delta; this only catches a rebuilt array whose entities are unchanged.
   const orderChanged =
     prestateNodes.length !== finalNodes.length ||
     prestateEdges.length !== finalEdges.length ||
@@ -2109,11 +2073,6 @@ async function executePreparedOnServerAlreadyLocked(
   }
 
   const toVersion = fromVersion + 1;
-  const orderEvents = siblingOrderEventsFor(
-    prestateNodes,
-    finalNodes,
-    toVersion,
-  );
   // What travels and is journalled: a deletion as an id. `deltas` keeps the
   // deleted nodes for the Review records and for in-process callers that
   // invert the batch.
@@ -2229,7 +2188,6 @@ async function executePreparedOnServerAlreadyLocked(
       deferredFitFrameIds: pendingEffects.deferredFitFrameIds,
     },
     ...(changes ? { changes } : {}),
-    ...(orderEvents.length > 0 ? { orderEvents } : {}),
     ...(nodeContentRevisions ? { nodeContentRevisions } : {}),
     ...envelope(toVersion),
   });
@@ -2333,21 +2291,24 @@ async function executePreparedOnServerAlreadyLocked(
     ),
   });
   if (input.publish !== false) {
-    publishCanvasUpdate(canvasId, {
-      type: 'update',
-      data: {
-        fromVersion,
-        toVersion,
-        deltas: wireDeltas,
-        pendingEffects: toWirePendingEffects(pendingEffects),
-        ...(orderEvents.length > 0 ? { orderEvents } : {}),
-        ...(nodeContentRevisions ? { nodeContentRevisions } : {}),
-        ...(originator.threadId ? { threadId: originator.threadId } : {}),
-        ...(broadcastChanges ? { changes: broadcastChanges } : {}),
-        ...(request ? { operationId: request.key.operationId } : {}),
-        source: originator.source,
-      },
-    });
+    publishCanvasUpdate(
+      canvasId,
+      canvasUpdateOf(
+        {
+          fromVersion,
+          toVersion,
+          deltas: wireDeltas,
+          pendingEffects,
+          nodeContentRevisions,
+        },
+        {
+          ...(originator.threadId ? { threadId: originator.threadId } : {}),
+          ...(broadcastChanges ? { changes: broadcastChanges } : {}),
+          ...(request ? { operationId: request.key.operationId } : {}),
+          source: originator.source,
+        },
+      ),
+    );
   }
 
   // After the update, so a page learns of the write before what follows
@@ -2543,7 +2504,7 @@ export async function applyDeltasOnServerAlreadyLocked(input: {
         for (const node of prestateNodes) previousById.set(node.id, node);
       }
     }
-    const finalNodes = input.agentNodeProjection
+    const projectedNodes = input.agentNodeProjection
       ? final.nodes
       : await Promise.all(
           final.nodes.map(async (node) => {
@@ -2593,6 +2554,15 @@ export async function applyDeltasOnServerAlreadyLocked(input: {
             };
           }),
         );
+    // A row may insert a node without an order key (a preview the World
+    // creates, a node moved in from another Space): it is keyed here for
+    // where it was put, as the executor's end of batch does. Before the
+    // diff, so that the rows announced, the journal and the nodes returned
+    // carry the keys that are stored.
+    const finalNodes = settlePaintOrder(
+      projectedNodes as NestableNode[],
+      prestateNodes as NestableNode[],
+    ) as CanvasNode[];
     const threadOwners = new Set<string>();
     for (const node of finalNodes) {
       if (node.type !== 'question' || typeof node.data.threadId !== 'string')

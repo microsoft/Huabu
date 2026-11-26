@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { storePostgresSpaceOrderKeys } from './order-keys-upgrade.js';
+
 // Immutable PostgreSQL v1 migration. SQL dialect/version history belongs to the adapter.
 const SCHEMA_V1 = `
   CREATE TABLE workspaces (
@@ -147,4 +149,9 @@ export const POSTGRES_MIGRATIONS = [
       CREATE INDEX nodes_by_change ON nodes(canvas_id, change_seq);
     `,
   },
+  // Version 5 — data only, no schema change. Every Space written before
+  // nodes carried their order keys gets them stored, once, so that its order
+  // does not depend on the code that reads it later. `data` runs after `sql`,
+  // in the same transaction.
+  { version: 5, sql: '', data: storePostgresSpaceOrderKeys },
 ] as const;

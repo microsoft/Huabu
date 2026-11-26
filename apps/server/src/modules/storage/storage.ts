@@ -26,7 +26,12 @@
 import { rm } from 'node:fs/promises';
 
 import { stripLegacyPortalTopology } from '@huabu/shared';
+import { seedNodeOrder } from '@huabu/shared/canvas-engine';
 
+import {
+  assertSpaceHierarchyLocked,
+  withSpaceHierarchyLock,
+} from '../canvas/write-coordinator.js';
 import { runInWorkspace } from '../workspace/context.js';
 import { runWorkspacePreparation } from '../workspace-activation.js';
 import {
@@ -51,6 +56,8 @@ import { PostgresWorkspaceRepository } from './backends/postgres/workspace-repos
 import { SqliteStructuredStore } from './backends/sqlite/structured-store.js';
 import { SqliteWorkspaceRepository } from './backends/sqlite/workspace-repository.js';
 import { refreshCanvasDirIndex } from './canvas-dirs.js';
+// For its effect: the SQL backends' version-5 data step needs the rule.
+import '../canvas/order-keys-upgrade-rule.js';
 import { hasStorageCapability } from './capabilities.js';
 import {
   openConnections,
@@ -58,10 +65,6 @@ import {
   releaseConnections,
   sqliteConnection,
 } from './connections.js';
-import {
-  assertSpaceHierarchyLocked,
-  withSpaceHierarchyLock,
-} from '../canvas/write-coordinator.js';
 import { spaceBlobAreas } from './ports/blob.js';
 import {
   parseStorageProfile,
@@ -251,7 +254,17 @@ function composeSpace(storage: Storage, canvasId: string): Space {
         record.state.nodes as Parameters<typeof stripLegacyPortalTopology>[0],
         record.state.edges as Parameters<typeof stripLegacyPortalTopology>[1],
       );
-      return { ...record, state: { ...record.state, ...topology } };
+      // Order keys for a Space stored before nodes carried them. Such Spaces
+      // are converted once, when their Workspace is opened or their database
+      // upgraded, so that a stored order never depends on the code reading it
+      // later; for those this returns the same array. It still converts a
+      // Space that arrives in the old format afterwards — an imported archive,
+      // a folder written by an older build — the same on every read, until
+      // its next write or the next open stores the keys.
+      const nodes = seedNodeOrder(
+        topology.nodes as unknown as Parameters<typeof seedNodeOrder>[0],
+      ) as unknown as typeof topology.nodes;
+      return { ...record, state: { ...record.state, ...topology, nodes } };
     },
     write: (input) => handle.write(input),
     save: handle.save,

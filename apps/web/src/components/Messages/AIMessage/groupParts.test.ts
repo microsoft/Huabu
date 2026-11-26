@@ -101,7 +101,6 @@ describe('describeActivity', () => {
         },
       ],
       summary: { visibleGroupCount: 1, stepCount: 1, changedFileCount: 0 },
-      changedPaths: [],
     });
     expect(segment).toEqual(
       thinking('`---`\n\nRead `use_agent_stream.ts` as `Array<T>`'),
@@ -130,7 +129,6 @@ describe('describeActivity', () => {
       stepCount: 6,
       changedFileCount: 2,
     });
-    expect(activity.changedPaths).toEqual(['same.ts', 'another.ts']);
     expect(
       activity.details
         .filter((detail) => detail.kind === 'tools')

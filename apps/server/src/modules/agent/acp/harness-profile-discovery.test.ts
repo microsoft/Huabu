@@ -265,7 +265,7 @@ describe('automatic ordinary Profile provisioning', () => {
   });
 
   it.each([true, false] as const)(
-    'defaults structured auto-approval only when the definition supports it (%s)',
+    'leaves auto-approval off whether or not the definition supports it (%s)',
     async (autoApprove) => {
       const context = setup();
       context.gateway.discoverHarnesses.mockResolvedValue({
@@ -282,7 +282,7 @@ describe('automatic ordinary Profile provisioning', () => {
       expect(context.profiles[0]?.launch).toEqual({
         kind: 'acp-harness',
         harnessId: 'copilot',
-        options: autoApprove ? { autoApprove: true } : undefined,
+        options: undefined,
       });
       dispose();
     },
@@ -396,13 +396,10 @@ describe('automatic ordinary Profile provisioning', () => {
       expect(typed).toMatchObject({
         alias: 'GitHub Copilot (machine-a: linux x64) [copilot]',
         workingDirPath: observation.harnesses[0].workingDirPath,
-        launch: {
-          kind: 'acp-harness',
-          harnessId: 'copilot',
-          options: { autoApprove: true },
-        },
+        launch: { kind: 'acp-harness', harnessId: 'copilot' },
         customData: { discoveredAgent: legacy.customData?.discoveredAgent },
       });
+      expect(typed?.launch).not.toHaveProperty('options.autoApprove', true);
       expect(typed?.id).not.toBe(legacy.id);
       expect(await registry.getProfile(legacy.id)).toEqual(legacy);
       expect(await registry.snapshotProfile(legacy.id)).toEqual(snapshot);
@@ -411,7 +408,7 @@ describe('automatic ordinary Profile provisioning', () => {
       }
       await registry.patchProfile(typed.id, {
         alias: legacy.alias,
-        launch: { ...typed.launch, options: { autoApprove: false } },
+        launch: { ...typed.launch, options: { autoApprove: true } },
       });
       context.emit({ agentletId: 'machine-a', status: 'connected' });
       context.emit({ agentletId: 'machine-a', status: 'connected' });
@@ -507,7 +504,7 @@ describe('automatic ordinary Profile provisioning', () => {
     }
   });
 
-  it('persists the new default and preserves an explicit opt-out after restart', async () => {
+  it('persists the default and preserves an explicit opt-in after restart', async () => {
     const storageDir = mkdtempSync(join(tmpdir(), 'huabu-discovery-approval-'));
     const context = setup();
     context.gateway.discoverHarnesses.mockResolvedValue({
@@ -536,7 +533,6 @@ describe('automatic ordinary Profile provisioning', () => {
       expect(profile.launch).toEqual({
         kind: 'acp-harness',
         harnessId: 'copilot',
-        options: { autoApprove: true },
       });
       await expect(
         (
@@ -550,10 +546,10 @@ describe('automatic ordinary Profile provisioning', () => {
         launch: {
           kind: 'acp-harness',
           harnessId: 'copilot',
-          options: { autoApprove: false },
+          options: { autoApprove: true },
         },
       });
-      expect(profile.launch).toMatchObject({ options: { autoApprove: true } });
+      expect(profile.launch).not.toHaveProperty('options');
       dispose();
       const restored = await createAgentProfileRegistry({
         store: new FileAgentProfileRegistryStore(storageDir),
@@ -566,7 +562,7 @@ describe('automatic ordinary Profile provisioning', () => {
       await flush();
       expect(await restored.listProfiles()).toEqual([edited]);
       expect((await restored.getProfile(profile.id))?.launch).toMatchObject({
-        options: { autoApprove: false },
+        options: { autoApprove: true },
       });
     } finally {
       dispose?.();

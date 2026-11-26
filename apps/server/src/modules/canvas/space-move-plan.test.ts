@@ -4,9 +4,11 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  describeFrameLayout,
   executeCanvasCommands,
   materializeAutoHeight,
   resolveHeightMode,
+  seedNodeOrder,
 } from '@huabu/shared/canvas-engine';
 
 import { buildSpaceMovePlan, SpaceMovePlanError } from './space-move-plan.js';
@@ -31,7 +33,7 @@ function node(
 }
 
 describe('buildSpaceMovePlan', () => {
-  it('rekeys Frame reading lists without deriving them from paint order', () => {
+  it('keeps a Frame’s reading order without deriving it from paint order', () => {
     const frame = node('frame', 'frame', 0, 0);
     frame.data = {
       layoutMode: 'column',
@@ -43,7 +45,9 @@ describe('buildSpaceMovePlan', () => {
     a.data.frameColumn = 0;
     b.data.frameColumn = 0;
     const plan = buildSpaceMovePlan({
-      sourceNodes: [frame, a, b],
+      // As the source Space is read: the stored list becomes the children's
+      // own track keys, which travel with them.
+      sourceNodes: seedNodeOrder([frame, a, b]),
       sourceEdges: [],
       destinationNodes: [],
       selectedNodeIds: ['frame'],
@@ -54,9 +58,38 @@ describe('buildSpaceMovePlan', () => {
       { source: 'system', commands: plan.commands },
       { nodes: [], edges: [], canvasId: 'destination' },
     ).writeResult.nodes;
-    expect(output.find((n) => n.type === 'frame')?.data.layoutOrder).toEqual([
-      [plan.nodeIdMap.get('b'), plan.nodeIdMap.get('a')],
-    ]);
+    const moved = output.find((n) => n.type === 'frame');
+    expect(moved?.data).not.toHaveProperty('layoutOrder');
+    expect(describeFrameLayout(output, moved?.id ?? '')).toEqual({
+      mode: 'column',
+      tracks: [[plan.nodeIdMap.get('b'), plan.nodeIdMap.get('a')]],
+    });
+  });
+  it('keeps the order of children that shared a track key, under their new ids', () => {
+    const frame = node('frame', 'frame', 0, 0);
+    frame.data = { layoutMode: 'column', gridCount: 1 };
+    // Put into the same gap by two pages at once: one key, read in id order.
+    const a = node('a', 'note', 0, 0, 'frame');
+    const b = node('b', 'note', 0, 200, 'frame');
+    a.data = { ...a.data, frameColumn: 0, trackKey: 'a1' };
+    b.data = { ...b.data, frameColumn: 0, trackKey: 'a1' };
+    const plan = buildSpaceMovePlan({
+      sourceNodes: seedNodeOrder([frame, b, a]),
+      sourceEdges: [],
+      destinationNodes: [],
+      selectedNodeIds: ['frame'],
+      destinationCanvasId: 'destination',
+      createSourcePreview: false,
+    });
+    const output = executeCanvasCommands(
+      { source: 'system', commands: plan.commands },
+      { nodes: [], edges: [], canvasId: 'destination' },
+    ).writeResult.nodes;
+    const keyOf = (sourceId: string) =>
+      output.find((n) => n.id === plan.nodeIdMap.get(sourceId))?.data
+        .trackKey as string;
+    // The keys alone say it now; the new ids are random.
+    expect(keyOf('a') < keyOf('b')).toBe(true);
   });
   it.each([
     { selectedNodeIds: ['pdf'] },

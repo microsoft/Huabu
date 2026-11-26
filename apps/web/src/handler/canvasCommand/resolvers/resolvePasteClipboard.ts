@@ -16,8 +16,7 @@ import {
   pdfNoteIds,
   generateNextLabel,
   resolveHeightMode,
-  readLayoutOrder,
-  remapLayoutOrder,
+  withDistinctTrackKeys,
 } from '@huabu/shared/canvas-engine';
 
 import { canvasSizeFromStyle, resolveFrameAtPoint } from '../utils';
@@ -40,7 +39,9 @@ export default function resolvePasteClipboard(
     intent.clipboardNodes ?? [],
     intent.clipboardEdges ?? [],
   );
-  const clipboard = topology.nodes;
+  // A copy gets new ids; children that shared a track key were told apart
+  // by id, so their order is written into the keys first.
+  const clipboard = withDistinctTrackKeys(topology.nodes);
   const ownedIds = pdfNoteIds(clipboard);
   if (clipboard.length === 0) {
     return { commands: [], trace: [] };
@@ -111,10 +112,6 @@ export default function resolvePasteClipboard(
 
     // Clone data.
     const clonedData = JSON.parse(JSON.stringify(node.data ?? {}));
-    const layoutOrder =
-      nodeType === 'frame' ? readLayoutOrder(node.data) : undefined;
-    if (layoutOrder)
-      clonedData.layoutOrder = remapLayoutOrder(layoutOrder, idMap);
     if (typeof clonedData.noteNodeId === 'string') {
       const mapped = idMap.get(clonedData.noteNodeId);
       if (!mapped) throw new Error('The copied PDF is missing its owned Note');

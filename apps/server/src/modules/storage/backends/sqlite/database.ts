@@ -107,6 +107,7 @@ export function applySqliteMigrations(
         );
       }
       database.exec(migration.sql);
+      migration.data?.(database);
       database.exec(`PRAGMA user_version = ${migration.version}`);
       version = migration.version;
     }

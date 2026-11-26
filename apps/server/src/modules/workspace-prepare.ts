@@ -14,6 +14,7 @@ import { mkdirSync } from 'node:fs';
 import {
   ensureWorkspaceManifestOnDisk,
   ensureWorldCanvasOnDisk,
+  storeSpaceOrderKeysOnDisk,
 } from './storage/index.js';
 import { migrateLegacyAcpSessions } from './workspace/migrations/migrate-acp-sessions.js';
 import {
@@ -29,10 +30,22 @@ import { renderExternalAgentSystemPreamble } from '../prompt/external-agent/syst
  * Prepare and migrate a resolved absolute workspace path on disk.
  *
  * Migration order is load-bearing — each step assumes the prior ones have run.
- * All migrations are idempotent (they leave a `.bak` on the source), so this is
- * safe to re-run on every activation.
+ * All migrations are idempotent (they leave a `.bak` on the source, or find
+ * nothing left to convert), so this is safe to re-run on every activation.
  */
-export function prepareWorkspaceOnDisk(workspacePath: string): void {
+export function prepareWorkspaceOnDisk(
+  workspacePath: string,
+  options: {
+    /**
+     * This Server already has the folder open. Its Spaces may be saved
+     * while this runs, in another process when this is the preparation
+     * worker, and nothing serializes the two. The one step that rewrites a
+     * Space record is then left out; such a Space gets its keys from the
+     * Server's own read and next save.
+     */
+    inUse?: boolean;
+  } = {},
+): void {
   mkdirSync(workspacePath, { recursive: true });
   // Adopt Home folders created by older Huabu versions before any other
   // migration runs. Managed and free mode therefore share one identity path.
@@ -65,4 +78,8 @@ export function prepareWorkspaceOnDisk(workspacePath: string): void {
     renderExternalAgentSystemPreamble(),
   );
   ensureWorldCanvasOnDisk(workspacePath);
+  // Store the order keys of Spaces written before nodes carried them, so
+  // their order no longer depends on the code that reads them. After the
+  // renames above, which give every Space its `space.json`.
+  if (!options.inUse) storeSpaceOrderKeysOnDisk(workspacePath);
 }

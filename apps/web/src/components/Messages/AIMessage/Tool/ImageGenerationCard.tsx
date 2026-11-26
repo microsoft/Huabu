@@ -20,6 +20,7 @@ import { ImagePlus, X as XIcon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { useChatSession } from '@/hooks/useChatSession';
+import { openServerFileInDesktop } from '@/hooks/useElectron';
 
 import { partIsExecuting, truncate } from './helpers';
 import { resolveArtifactUrl } from '../../../../api/artifact';
@@ -135,6 +136,9 @@ export function ImageGenerationCard({ part }: ImageGenerationCardProps) {
           href={previewUrl}
           target="_blank"
           rel="noopener noreferrer"
+          onClick={(event) => {
+            if (openServerFileInDesktop(previewUrl)) event.preventDefault();
+          }}
           className="inline-block w-fit"
           title={t('messages.openFullImage')}
         >
@@ -192,6 +196,9 @@ export function ImageGenerationCard({ part }: ImageGenerationCardProps) {
                   href={url}
                   target="_blank"
                   rel="noopener noreferrer"
+                  onClick={(event) => {
+                    if (openServerFileInDesktop(url)) event.preventDefault();
+                  }}
                   title={refSrc}
                   className="border-edge-default bg-bg-default block size-12 overflow-hidden rounded-sm border"
                 >

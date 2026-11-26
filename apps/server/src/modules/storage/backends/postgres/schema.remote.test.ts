@@ -10,6 +10,11 @@ import {
   openPostgresTestDatabase,
   openPostgresTestStore,
 } from './test-support.js';
+import { stateWithOrderKeys } from '../../../canvas/stored-node-order.js';
+import {
+  provideSpaceStateRewrite,
+  SPACE_ORDER_KEYS_REWRITE,
+} from '../../ports/space-state-rewrites.js';
 /**
  * Everything the migrations define in the current schema: columns in order
  * with type, nullability and default; constraints; indexes.
@@ -48,6 +53,10 @@ const cleanup: Array<() => Promise<unknown>> = [];
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
 });
+// These tests upgrade databases that hold Spaces without composing storage,
+// which is what provides the rule the version-5 data step runs.
+provideSpaceStateRewrite(SPACE_ORDER_KEYS_REWRITE, stateWithOrderKeys);
+
 it('runs on PostgreSQL 18 and serializes simultaneous fresh migrations', async () => {
   const h = await openPostgresTestDatabase();
   cleanup.push(h.cleanup);
@@ -90,7 +99,7 @@ it('runs on PostgreSQL 18 and serializes simultaneous fresh migrations', async (
     ]),
   );
 });
-it('reaches the same v4 schema from a fresh database and from a v2 database', async () => {
+it('reaches the same schema from a fresh database and from a v2 database', async () => {
   const fresh = await openPostgresTestStore(false);
   cleanup.push(fresh.cleanup);
   const h = await openPostgresTestDatabase();
@@ -107,16 +116,16 @@ it('reaches the same v4 schema from a fresh database and from a v2 database', as
     "INSERT INTO workspaces VALUES ('original', 'Original', 1, 1, NULL)",
   );
   await pool.query(
-    "INSERT INTO spaces (workspace_id, canvas_id, title, collision_key, version, created_at, updated_at, state_json) VALUES ('original', 's', 'S', 's', 3, 1, 1, '{}')",
+    `INSERT INTO spaces (workspace_id, canvas_id, title, collision_key, version, created_at, updated_at, state_json) VALUES ('original', 's', 'S', 's', 3, 1, 1, '{"nodes":[],"edges":[]}')`,
   );
   await pool.query("INSERT INTO nodes VALUES ('s', 'n', '{}', 'r', 'n')");
   const context = new PostgresStoreContext(h.config);
   cleanup.push(() => context.close());
   await context.init();
   const db = context.connection();
-  expect(POSTGRES_MIGRATIONS.length).toBe(4);
+  expect(POSTGRES_MIGRATIONS.length).toBe(5);
   expect((await db.query('SELECT * FROM huabu_schema_version')).rows).toEqual([
-    { id: 1, version: 4 },
+    { id: 1, version: 5 },
   ]);
   expect(
     (await db.query('SELECT canvas_id, version, node_change_seq FROM spaces'))
