@@ -14,7 +14,11 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { buildCanvasOutline, inspectNodes } from './canvas-spatial.js';
+import {
+  buildCanvasOutline,
+  inspectEdges,
+  inspectNodes,
+} from './canvas-spatial.js';
 import { getCanvasStore, resetStorageCache } from '../storage/index.js';
 import { setWorkspacePath } from '../workspace.js';
 
@@ -80,6 +84,40 @@ beforeEach(() => {
 afterEach(() => {
   resetStorageCache();
   rmSync(tmp, { recursive: true, force: true });
+});
+
+describe('inspect_edges line shapes', () => {
+  it('filters omitted shapes as bezier while retaining explicit and legacy shapes', async () => {
+    const canvasId = 'edge-shapes';
+    const base = { source: 'a', target: 'b' };
+    getCanvasStore(canvasId).write({
+      canvasId,
+      title: null,
+      version: 1,
+      state: {
+        nodes: [],
+        edges: [
+          { ...base, id: 'default' },
+          { ...base, id: 'curve', data: { edgeStyle: { lineType: 'bezier' } } },
+          { ...base, id: 'step', data: { edgeStyle: { lineType: 'step' } } },
+          { ...base, id: 'legacy-step', type: 'smoothstep' },
+          { ...base, id: 'legacy-straight', type: 'straight' },
+        ],
+      },
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+
+    for (const [lineType, ids] of [
+      ['bezier', ['default', 'curve']],
+      ['step', ['step', 'legacy-step']],
+      ['straight', ['legacy-straight']],
+    ] as const) {
+      const result = await inspectEdges(canvasId, { byLineType: lineType });
+      if ('error' in result) throw new Error(result.error);
+      expect(result.edges.map((edge) => edge.id)).toEqual(ids);
+    }
+  });
 });
 
 describe('inspect_nodes / outline — dual-field coordinates', () => {
