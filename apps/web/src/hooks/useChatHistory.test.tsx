@@ -353,6 +353,34 @@ describe('bounded history refill and completion', () => {
     ).toEqual(['old:0', 'old:1', 'other:0', 'other:1', 'latest:1']);
   });
 
+  it('shows a retried first load as loading before it reports failing again', async () => {
+    vi.useFakeTimers();
+    seedStore(false);
+    useChatStore.getState().setMessages(THREAD_ID, []);
+    useChatStore.getState().setHistoryLoaded(THREAD_ID, false);
+    apiMocks.fetchHistoryPage.mockRejectedValue(new Error('offline'));
+    function FirstLoad() {
+      latestHistory = useChatHistory(SESSION, noopSetIsLoading);
+      return null;
+    }
+    container = document.createElement('div');
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(<FirstLoad />);
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    const error = () =>
+      useChatStore.getState().threadsById[THREAD_ID]?.historyError;
+    // The first failure is reported at once.
+    expect(error()).toBe('offline');
+
+    await act(async () => latestHistory.retryHistory());
+    expect(apiMocks.fetchHistoryPage).toHaveBeenCalledTimes(2);
+    expect(error()).toBeFalsy();
+    await act(async () => vi.advanceTimersByTimeAsync(400));
+    expect(error()).toBe('offline');
+  });
+
   it('deduplicates page refills and reuses the original page size and cursor', async () => {
     const page = seedPages();
     let resolve!: (value: unknown) => void;
@@ -1008,6 +1036,125 @@ describe('bounded history refill and completion', () => {
         .getState()
         .threadsById[THREAD_ID]?.messages.map((message) => message.id),
     ).toEqual(['completed:0', 'completed:1']);
+  });
+
+  it('settles an unresolved send on retry instead of refusing the reload', async () => {
+    seedPages();
+    useChatStore.getState().addMessage(THREAD_ID, {
+      id: 'live-user',
+      role: 'user',
+      content: 'New question',
+    });
+    useChatStore.getState().addMessage(THREAD_ID, {
+      id: 'live-answer',
+      role: 'assistant',
+      segments: [{ kind: 'text', text: 'New answer' }],
+    });
+    apiMocks.fetchHistoryPage.mockRejectedValueOnce(new Error('offline'));
+    await renderHarness();
+    await act(async () =>
+      useChatStore.getState().markTurnCompleted(THREAD_ID, 'live-answer'),
+    );
+    expect(latestHistory.historyPageError).toBe(
+      'Failed to refresh conversation history',
+    );
+    apiMocks.fetchHistoryPage.mockResolvedValue({
+      threadId: THREAD_ID,
+      turns: [
+        {
+          id: 'latest',
+          messages: [
+            {
+              role: 'assistant',
+              parts: [{ kind: 'text', text: 'Latest answer' }],
+            },
+          ],
+        },
+      ],
+      hasMore: false,
+    });
+    const unresolved = vi
+      .spyOn(turnController, 'hasUnreconciledAgentTurn')
+      .mockReturnValue(true);
+    const reconcile = vi
+      .spyOn(turnController, 'reconcileAgentTurnAfterReconnect')
+      .mockImplementation(async () => {
+        unresolved.mockReturnValue(false);
+      });
+    try {
+      await act(async () => latestHistory.retryHistory());
+      await vi.waitFor(() => expect(reconcile).toHaveBeenCalledOnce());
+      expect(apiMocks.reconnectStream).toHaveBeenCalledOnce();
+      expect(latestHistory.historyPageError).toBeUndefined();
+      await vi.waitFor(() =>
+        expect(
+          useChatStore
+            .getState()
+            .threadsById[THREAD_ID]?.messages.map((message) => message.id),
+        ).toEqual(['latest:0']),
+      );
+    } finally {
+      unresolved.mockRestore();
+      reconcile.mockRestore();
+    }
+  });
+
+  it('settles an unresolved send when the network returns, not while offline', async () => {
+    seedPages();
+    await renderHarness();
+    const unresolved = vi
+      .spyOn(turnController, 'hasUnreconciledAgentTurn')
+      .mockReturnValue(true);
+    const reconcile = vi
+      .spyOn(turnController, 'reconcileAgentTurnAfterReconnect')
+      .mockImplementation(async () => {
+        unresolved.mockReturnValue(false);
+      });
+    const online = vi.spyOn(navigator, 'onLine', 'get');
+    try {
+      online.mockReturnValue(false);
+      await act(async () => window.dispatchEvent(new Event('online')));
+      expect(apiMocks.reconnectStream).not.toHaveBeenCalled();
+
+      online.mockReturnValue(true);
+      await act(async () => window.dispatchEvent(new Event('online')));
+      await vi.waitFor(() => expect(reconcile).toHaveBeenCalledOnce());
+      expect(apiMocks.reconnectStream).toHaveBeenCalledOnce();
+    } finally {
+      online.mockRestore();
+      unresolved.mockRestore();
+      reconcile.mockRestore();
+    }
+  });
+
+  it('does not restart an attachment that is already settling an unresolved send', async () => {
+    seedPages();
+    await renderHarness();
+    const unresolved = vi
+      .spyOn(turnController, 'hasUnreconciledAgentTurn')
+      .mockReturnValue(true);
+    let finish!: (value: AgentStreamAttachResult) => void;
+    apiMocks.reconnectStream.mockImplementation(
+      async () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    try {
+      await act(async () => window.dispatchEvent(new Event('online')));
+      await vi.waitFor(() =>
+        expect(apiMocks.reconnectStream).toHaveBeenCalledOnce(),
+      );
+      // Still in flight: neither the network event nor Retry may restart it.
+      await act(async () => window.dispatchEvent(new Event('online')));
+      await act(async () => latestHistory.retryHistory());
+      await act(async () => window.dispatchEvent(new Event('online')));
+      expect(apiMocks.reconnectStream).toHaveBeenCalledOnce();
+    } finally {
+      unresolved.mockReturnValue(false);
+      await act(async () => finish?.({ status: 'aborted' }));
+      unresolved.mockRestore();
+    }
   });
 
   it('does not re-check a reconciled turn when a later send fails before acceptance', async () => {

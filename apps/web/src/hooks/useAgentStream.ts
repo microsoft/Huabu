@@ -6,6 +6,7 @@ import { useCallback } from 'react';
 import { createId } from '@huabu/shared';
 
 import { toast } from '@/components/Common/Toast';
+import { isUndeliveredMessage } from '@/store/chatHistoryCache';
 import {
   selectThreadIsLoading,
   selectThreadPendingAttachments,
@@ -21,6 +22,7 @@ import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 import { hasAgentStreamClaim } from './agentStreamCoordinator';
 import {
   captureAgentTurnSources,
+  hasUnreconciledAgentTurn,
   createAgentTurnUserMessage,
   dispatchAgentTurn,
   prepareAgentTurn,
@@ -112,7 +114,9 @@ export function useAgentStream(
         !!chat.threadsById[session.threadId]?.isPreparing ||
         selectThreadIsLoading(chat, session.threadId) ||
         queuedTurns.length > 0 ||
-        hasAgentStreamClaim(session.ownerCanvasId, session.threadId);
+        hasAgentStreamClaim(session.ownerCanvasId, session.threadId) ||
+        // The earlier send may still reach the Agent; this one waits its turn.
+        hasUnreconciledAgentTurn(session.ownerCanvasId, session.threadId);
       const draft = selectThreadDraft(chat, session.threadId);
       const excludeCanvasSelection = selectThreadExcludeCanvasSelection(
         chat,
@@ -221,6 +225,10 @@ export function useAgentStream(
           },
           onAcceptanceRejected: restoreDraft,
         });
+        // A send that got no answer keeps its message in the transcript, to be
+        // confirmed or resent from there; the composer is left alone.
+        if (result.status === 'unknown' || result.status === 'undelivered')
+          draftConsumed = false;
         if (
           !result.accepted &&
           (result.status === 'rejected' ||
@@ -255,6 +263,20 @@ export function useAgentStream(
         }
         await dispatchAgentTurn(prepareAgentTurnRetry(session, message, mode), {
           canDispatch,
+          // The resend takes the place of an attempt that was never delivered,
+          // which history would otherwise keep beside it.
+          onStarted: () => {
+            const chat = useChatStore.getState();
+            const messages = selectThreadMessages(chat, session.threadId);
+            const index = messages.findIndex(
+              (candidate) => candidate.id === message.id,
+            );
+            if (isUndeliveredMessage(messages, index))
+              chat.setMessages(session.threadId, [
+                ...messages.slice(0, index),
+                ...messages.slice(index + 2),
+              ]);
+          },
         });
       } catch (error) {
         toast(error instanceof Error ? error.message : String(error), {

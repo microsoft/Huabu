@@ -51,7 +51,8 @@ interface MessageListProps {
   isHistoryLoading?: boolean;
   isHistoryReady?: boolean;
   hideAIActions?: boolean;
-  onRetry?: () => void;
+  /** Resend the user message the failed row belongs to. */
+  onRetry?: (message: Extract<ChatMessage, { role: 'user' }>) => void;
   hasOlderHistory?: boolean;
   isLoadingOlderHistory?: boolean;
   olderHistoryError?: string;
@@ -107,6 +108,15 @@ function ScrollPlaceholder({
 
 const VIRTUAL_COMPONENTS = { ScrollSeekPlaceholder: ScrollPlaceholder };
 
+type StatusRow = Extract<ChatMessage, { role: 'status' }>;
+/** What the list draws: every message but the delivery-confirmation marker. */
+type ShownMessage =
+  | Exclude<ChatMessage, StatusRow>
+  | (StatusRow & { status: Exclude<StatusRow['status'], 'confirming'> });
+function isShownMessage(message: ChatMessage): message is ShownMessage {
+  return !(message.role === 'status' && message.status === 'confirming');
+}
+
 export const MessageList = memo(function MessageList(props: MessageListProps) {
   // A different thread must never inherit another thread's virtual measurements.
   return (
@@ -116,7 +126,7 @@ export const MessageList = memo(function MessageList(props: MessageListProps) {
 
 function VirtualMessageList({
   onLatestVisibleChange,
-  messages,
+  messages: allMessages,
   activationId,
   threadId,
   isLoading,
@@ -139,6 +149,12 @@ function VirtualMessageList({
   openPositionRequestNonce,
   onOpenPositionHandled,
 }: MessageListProps) {
+  // A send whose delivery is being confirmed looks like one still in flight:
+  // its marker row is not shown, only the working indicator.
+  const messages = useMemo(
+    () => allMessages.filter(isShownMessage),
+    [allMessages],
+  );
   const { t } = useTranslation();
   const list = useRef<VirtuosoHandle>(null);
   const [scroller, setScroller] = useState<HTMLElement | null>(null);
@@ -1035,7 +1051,17 @@ function VirtualMessageList({
           <StatusMessage
             status={message.status}
             detail={message.detail}
-            onRetry={onRetry}
+            onRetry={
+              onRetry &&
+              (() => {
+                // The row's own message, which is not always the latest one.
+                const sent = messages
+                  .slice(0, messages.indexOf(message))
+                  .filter((candidate) => candidate.role === 'user')
+                  .at(-1);
+                if (sent?.role === 'user') onRetry(sent);
+              })
+            }
           />
         )}
       </div>

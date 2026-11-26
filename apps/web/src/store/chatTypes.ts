@@ -106,8 +106,12 @@ export type ChatMessage =
       /** Whether this message belongs to the currently active server turn. */
       historyTurnActive?: boolean;
       role: 'status';
-      status: 'interrupted' | 'error';
-      /** Stop confirmed no durable turn was accepted; no history is expected. */
+      /**
+       * `confirming`: the send got no answer and the page is asking the server
+       * whether it arrived.
+       */
+      status: 'interrupted' | 'error' | 'confirming';
+      /** No durable turn exists for the message this follows; history keeps it. */
       localOnly?: boolean;
       detail?: string;
     };

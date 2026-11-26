@@ -23,6 +23,7 @@ import {
 
 import { AgentTurnFailedError, ApiError } from '@/api/_client';
 import { agentApi, type AgentStreamCallbacks } from '@/api/agent';
+import { i18n } from '@/i18n';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
 import useCanvasStore, {
   saveCanvasForSubmission,
@@ -363,10 +364,13 @@ export async function reconcileAgentTurnAfterReconnect(
       'Agent request reconciliation returned no matching request',
     );
   }
-  useChatStore.getState().setQueuePaused(threadId, true);
+  // An accepted request is an ordinary turn and the queue follows it. One the
+  // server never received pauses the queue as it is rejected below.
   if (response.request.accepted) {
     turnAcceptanceSinks.delete(key);
     sink.accept({ requestId: sink.requestId });
+    // The queue was held only because this send was in doubt.
+    useChatStore.getState().setQueuePaused(threadId, false);
   } else {
     rejectAgentTurnAcceptance(canvasId, threadId);
   }
@@ -901,7 +905,19 @@ export interface AgentTurnCallbacks {
 }
 
 export interface AgentTurnResult {
-  status: 'completed' | 'failed' | 'stopped' | 'rejected' | 'unknown' | 'busy';
+  /**
+   * `unknown`: no answer arrived while the browser was online, so the server
+   * may have the request; it is confirmed before anything else is sent.
+   * `undelivered`: the browser was offline, so the request never left.
+   */
+  status:
+    | 'completed'
+    | 'failed'
+    | 'stopped'
+    | 'rejected'
+    | 'unknown'
+    | 'undelivered'
+    | 'busy';
   accepted?: AgentTurnAcceptance;
   error?: Error;
   /** True only after a successful done event, never just a transport close. */
@@ -1365,9 +1381,55 @@ async function executePreparedAgentTurn(
         );
     };
 
+    // Set once this send has ended. A sink that outlives it belongs to a send
+    // whose delivery is being confirmed.
+    let ended = false;
+    let confirmingStatusId: string | undefined;
+    /** Drop the local copy of a send that is no longer shown as its own row. */
+    const removeLocalAttempt = () => {
+      const chat = useChatStore.getState();
+      chat.setMessages(
+        threadId,
+        selectThreadMessages(chat, threadId).filter(
+          (message) =>
+            message.id !== userMessageId && message.id !== confirmingStatusId,
+        ),
+      );
+    };
+    /** Report a send that got no answer from the server at all. */
+    const reportUnanswered = () => {
+      if (!navigator.onLine) {
+        // The request cannot have left the browser: nothing to confirm.
+        result.status = 'undelivered';
+        if (callbacks.queuedTurnId) {
+          // The queue item itself returns to pending; leave no second copy.
+          removeThreadMessage(threadId, userMessageId);
+          return;
+        }
+        addMessage(threadId, {
+          id: createId('status'),
+          role: 'status',
+          status: 'error',
+          localOnly: true,
+          detail: i18n.t('chat.sendNotDelivered'),
+        });
+        return;
+      }
+      result.status = 'unknown';
+      confirmingStatusId = createId('status');
+      addMessage(threadId, {
+        id: confirmingStatusId,
+        role: 'status',
+        status: 'confirming',
+        localOnly: true,
+      });
+    };
     const acceptTurn = (accepted: AgentTurnAcceptance) => {
       if (result.accepted) return;
       result.accepted = accepted;
+      // Confirmed after the send ended: history holds the turn, so the local
+      // copy gives way to it.
+      if (ended) removeLocalAttempt();
       if (isComposingQuestion && !serverSettingsConfirmed) {
         serverSettingsConfirmed = true;
         useChatStore.getState().makeThreadMetadataEphemeral(threadId);
@@ -1384,6 +1446,27 @@ async function executePreparedAgentTurn(
       accept: acceptTurn,
       reject: () => {
         result.status = 'rejected';
+        if (ended) {
+          // Confirmed as never received. A queued item is back in the queue;
+          // a direct send stays where it is, marked for the user to resend.
+          useChatStore.getState().setQueuePaused(threadId, true);
+          if (callbacks.queuedTurnId) removeLocalAttempt();
+          else {
+            const chat = useChatStore.getState();
+            chat.setMessages(
+              threadId,
+              selectThreadMessages(chat, threadId).map((message) =>
+                message.id === confirmingStatusId && message.role === 'status'
+                  ? {
+                      ...message,
+                      status: 'error',
+                      detail: i18n.t('chat.sendNotDelivered'),
+                    }
+                  : message,
+              ),
+            );
+          }
+        }
         callbacks.onAcceptanceRejected?.();
       },
     };
@@ -1473,6 +1556,10 @@ async function executePreparedAgentTurn(
             // The server keeps running an accepted turn; it is re-attached on
             // release instead of being reported as failed.
             if (result.accepted && result.connectionLost) return;
+            if (result.connectionLost) {
+              reportUnanswered();
+              return;
+            }
             addMessage(threadId, {
               id: createId('status'),
               role: 'status',
@@ -1529,6 +1616,14 @@ async function executePreparedAgentTurn(
       errorHandled = true;
       result.error = err instanceof Error ? err : new Error(String(err));
       console.error(`${agentMode} failed:`, err);
+      if (
+        !result.accepted &&
+        !(err instanceof ApiError) &&
+        !(err instanceof AgentTurnFailedError)
+      ) {
+        reportUnanswered();
+        return;
+      }
       addMessage(threadId, {
         id: createId('status'),
         role: 'status',
@@ -1560,6 +1655,7 @@ async function executePreparedAgentTurn(
         useChatStore.getState().setThreadPreparing(threadId, false);
         activeTurnRequests.delete(acceptanceKey);
         clearHiddenIntentCalls(threadId);
+        ended = true;
         const retainForReconciliation =
           result.status === 'unknown' && !result.accepted;
         if (

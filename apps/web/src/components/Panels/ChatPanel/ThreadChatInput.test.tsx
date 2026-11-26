@@ -173,7 +173,7 @@ describe('ThreadChatInput', () => {
     );
     for (const [turnStatus, label] of [
       ['sending', 'chat.queueSending'],
-      ['uncertain', 'chat.queueUncertain'],
+      ['uncertain', 'chat.queueSending'],
       ['pending', 'chat.queuePending'],
     ] as const) {
       act(() =>
@@ -190,6 +190,21 @@ describe('ThreadChatInput', () => {
       }
       expect(remove?.disabled).toBe(turnStatus !== 'pending');
     }
+    // Once the turn being sent is in the conversation it is not listed twice.
+    act(() => {
+      chat.setQueuedTurnStatus(session.threadId, 'queued-1', 'sending');
+      chat.addMessage(session.threadId, {
+        id: 'sent',
+        role: 'user',
+        content: 'Full queued request',
+        queuedTurnId: 'queued-1',
+      });
+    });
+    expect(container.querySelector('section')).toBeNull();
+    act(() => {
+      chat.setMessages(session.threadId, []);
+      chat.setQueuedTurnStatus(session.threadId, 'queued-1', 'pending');
+    });
     act(() => chat.setQueuePaused(session.threadId, true));
     expect(container.textContent).toContain('chat.queuePaused');
     const resume = Array.from(container.querySelectorAll('button')).find(
