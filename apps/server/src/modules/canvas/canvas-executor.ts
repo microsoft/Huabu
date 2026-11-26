@@ -44,6 +44,7 @@ import {
   type PostCanvasExecuteResponse,
   type CanvasEdgeId,
   type CanvasNodeId,
+  type CanvasSyncEvent,
   type ExecuteConflict,
   type ExecuteOriginator,
   type InteractiveViewJsonValue,
@@ -71,6 +72,9 @@ import {
   slimDeltas,
   toWireDeltas,
   changesAgentNodePreparation,
+  MD_BACKED_NODE_TYPES,
+  NODE_CONTENT_KEYS,
+  TEXT_BEARING_NODE_TYPES,
   type CanvasChangeRecord,
   type CanvasEdge,
   type CanvasNode,
@@ -150,50 +154,6 @@ function insertedNodeIds(deltas: readonly Delta[]): Set<string> {
     ),
   );
 }
-
-// ── Markdown-backed-node knowledge (mirrors canvas.route.ts) ─────────────
-//
-// Kept in sync with the equivalent sets in `canvas.route.ts`. Both files
-// are intentionally self-contained so an accidental import cycle
-// between the route and the executor cannot occur — when these sets
-// drift we have a single failing test (per-node content round-trip) that
-// surfaces the discrepancy. See `docs/architecture/canvas-storage.md`.
-
-const MD_BACKED_NODE_TYPES = new Set([
-  'fileReference',
-  'note',
-  'text',
-  'web',
-  'pdf',
-  'office',
-  'image',
-  'video',
-  'audio',
-  'frame',
-  'question',
-  'sketch',
-]);
-
-const TEXT_BEARING_NODE_TYPES = new Set([
-  'note',
-  'text',
-  'web',
-  'pdf',
-  'office',
-  'question',
-]);
-
-const NODE_CONTENT_KEYS = new Set([
-  'content',
-  'label',
-  'labelSource',
-  'src',
-  'summary',
-  'keywords',
-  'provenance',
-  'properties',
-  'propertyDisplayKeys',
-]);
 
 function stripNodesForCanvas(nodes: readonly CanvasNode[]): CanvasNode[] {
   return nodes.map((node) => {
@@ -1303,7 +1263,7 @@ export class CanvasNotFoundError extends Error {
 }
 
 /** Pending effects as they travel: the mutated nodes by id. */
-export function toWirePendingEffects(effects: {
+function toWirePendingEffects(effects: {
   mutatedNodes: readonly CanvasNode[];
   deletedNodeIds: readonly string[];
   contentEditedNodeIds: readonly string[];
@@ -1364,22 +1324,53 @@ export function toExecuteResponse(
   };
 }
 
+type CanvasUpdateData = Extract<CanvasSyncEvent, { type: 'update' }>['data'];
+
+/** What a write to a Space left: the part of it an update carries. */
+type CanvasWrite = Pick<
+  ExecuteOnServerOutput,
+  | 'fromVersion'
+  | 'toVersion'
+  | 'deltas'
+  | 'pendingEffects'
+  | 'nodeContentRevisions'
+>;
+
+/**
+ * The update that takes a page from the version before a write to the one
+ * after it. Every writer builds its update here, so what an update carries
+ * is decided in one place; `about` adds what only that writer knows (who
+ * made the write, the request it answers, the review records it produced).
+ */
+export function canvasUpdateOf(
+  write: CanvasWrite,
+  about?: Omit<Partial<CanvasUpdateData>, keyof CanvasWrite>,
+): CanvasSyncEvent {
+  return {
+    type: 'update',
+    data: {
+      fromVersion: write.fromVersion,
+      toVersion: write.toVersion,
+      deltas: write.deltas,
+      pendingEffects: toWirePendingEffects(write.pendingEffects),
+      ...(write.nodeContentRevisions
+        ? { nodeContentRevisions: write.nodeContentRevisions }
+        : {}),
+      ...about,
+    },
+  };
+}
+
 /** Publish a system lifecycle batch after its related metadata has settled. */
 export function publishCanvasExecution(output: ExecuteOnServerOutput): void {
   if (output.toVersion === output.fromVersion) return;
-  publishCanvasUpdate(output.canvasId, {
-    type: 'update',
-    data: {
-      fromVersion: output.fromVersion,
-      toVersion: output.toVersion,
-      deltas: output.deltas,
-      pendingEffects: toWirePendingEffects(output.pendingEffects),
-      ...(output.nodeContentRevisions
-        ? { nodeContentRevisions: output.nodeContentRevisions }
-        : {}),
-      ...(output.operationId ? { operationId: output.operationId } : {}),
-    },
-  });
+  publishCanvasUpdate(
+    output.canvasId,
+    canvasUpdateOf(
+      output,
+      output.operationId ? { operationId: output.operationId } : undefined,
+    ),
+  );
 }
 
 /**
@@ -2300,20 +2291,24 @@ async function executePreparedOnServerAlreadyLocked(
     ),
   });
   if (input.publish !== false) {
-    publishCanvasUpdate(canvasId, {
-      type: 'update',
-      data: {
-        fromVersion,
-        toVersion,
-        deltas: wireDeltas,
-        pendingEffects: toWirePendingEffects(pendingEffects),
-        ...(nodeContentRevisions ? { nodeContentRevisions } : {}),
-        ...(originator.threadId ? { threadId: originator.threadId } : {}),
-        ...(broadcastChanges ? { changes: broadcastChanges } : {}),
-        ...(request ? { operationId: request.key.operationId } : {}),
-        source: originator.source,
-      },
-    });
+    publishCanvasUpdate(
+      canvasId,
+      canvasUpdateOf(
+        {
+          fromVersion,
+          toVersion,
+          deltas: wireDeltas,
+          pendingEffects,
+          nodeContentRevisions,
+        },
+        {
+          ...(originator.threadId ? { threadId: originator.threadId } : {}),
+          ...(broadcastChanges ? { changes: broadcastChanges } : {}),
+          ...(request ? { operationId: request.key.operationId } : {}),
+          source: originator.source,
+        },
+      ),
+    );
   }
 
   // After the update, so a page learns of the write before what follows

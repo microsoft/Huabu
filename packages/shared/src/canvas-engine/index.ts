@@ -12,6 +12,12 @@ export {
   describeFrameLayout,
 } from './autoLayout/gridLayout.js';
 
+export {
+  MD_BACKED_NODE_TYPES,
+  NODE_CONTENT_KEYS,
+  TEXT_BEARING_NODE_TYPES,
+} from './nodeContentFields.js';
+
 /**
  * @huabu/shared/canvas-engine — pure, server-portable canvas command engine.
  *
