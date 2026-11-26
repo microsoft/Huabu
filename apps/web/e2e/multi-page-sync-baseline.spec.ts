@@ -929,10 +929,51 @@ async function executeScenario(
 const AGENT_ROUNDS = 5;
 
 /**
- * Three Agents write at once, each several times, while a person on page A
- * types a body into the note one Agent is tagging and then drags another
- * note. Every write names different nodes or different properties, so all of
- * them must land whatever order they arrive in.
+ * Record every sync notice a page shows from now on. A warning leaves the
+ * page after a few seconds, so counting what is on screen at the end would
+ * miss one that came and went.
+ */
+async function recordSyncTrouble(page: Page) {
+  await page.evaluate((pattern) => {
+    const seen: string[] = [];
+    (window as unknown as { __syncTroubleSeen: string[] }).__syncTroubleSeen =
+      seen;
+    const trouble = new RegExp(pattern);
+    const note = (node: Node) => {
+      const text = node.textContent ?? '';
+      if (trouble.test(text) && !seen.includes(text)) seen.push(text);
+    };
+    note(document.body);
+    new MutationObserver((records) => {
+      for (const record of records) {
+        note(record.target);
+        record.addedNodes.forEach(note);
+      }
+    }).observe(document.body, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
+  }, SYNC_TROUBLE_TOAST.source);
+}
+
+async function syncTroubleSeen(page: Page) {
+  return page.evaluate(
+    () =>
+      (window as unknown as { __syncTroubleSeen?: string[] })
+        .__syncTroubleSeen ?? [],
+  );
+}
+
+/**
+ * Three Agents write at once, in rounds, while a person on page A types a
+ * body into the note one Agent is tagging and then drags another note. Every
+ * write names different nodes or different properties, so all of them must
+ * land whatever order they arrive in.
+ *
+ * The overlap is made, not hoped for: the first round is committed, and has
+ * reached page A, while A's body is typed and its save is held back; the
+ * second while A's mouse button is down on the note it drags.
  */
 async function parallelAgentsScenario(
   browser: Browser,
@@ -942,28 +983,11 @@ async function parallelAgentsScenario(
   const { canvasId, a, b } = await openBoth(browser, request, 'Sync agents');
   const versionBefore = (await serverRecord(request, canvasId)).version;
   const zFinal = { x: 820 + 10 * AGENT_ROUNDS, y: 90 + 60 * AGENT_ROUNDS };
-  const rounds = Array.from({ length: AGENT_ROUNDS }, (_, index) => index + 1);
-  const writer = async (
-    threadId: string,
-    command: (round: number) => unknown,
-  ) => {
-    const outcomes: { status: number; applied: boolean[] }[] = [];
-    for (const round of rounds) {
-      const response = await agentExecute(request, canvasId, [command(round)], {
-        threadId,
-      });
-      const body = response.ok()
-        ? ((await response.json()) as AgentExecuteResponse)
-        : undefined;
-      outcomes.push({
-        status: response.status(),
-        applied: body?.results.map((result) => result.applied) ?? [],
-      });
-    }
-    return outcomes;
-  };
-  const agents = Promise.all([
-    writer('thread-e2e-agent-creates', (round) => ({
+  await recordSyncTrouble(a.page);
+  await recordSyncTrouble(b.page);
+
+  const commands: Array<(round: number) => unknown> = [
+    (round) => ({
       type: 'CREATE_NODES',
       nodes: [
         {
@@ -973,24 +997,107 @@ async function parallelAgentsScenario(
           size: { width: 300, height: 200 },
         },
       ],
-    })),
-    writer('thread-e2e-agent-moves', (round) => ({
+    }),
+    (round) => ({
       type: 'SET_NODE_GEOMETRY',
       items: [
         { nodeId: Z, position: { x: 820 + 10 * round, y: 90 + 60 * round } },
       ],
-    })),
-    writer('thread-e2e-agent-tags', (round) => ({
+    }),
+    (round) => ({
       type: 'MERGE_NODE_DATA',
       patches: [{ nodeId: X, patch: { properties: { Round: round } } }],
-    })),
-  ]);
+    }),
+  ];
+  const agentOutcomes: { status: number; applied: boolean[] }[][] = [];
+  /** One write of each Agent, sent together. */
+  const agentRound = async (round: number) => {
+    agentOutcomes.push(
+      await Promise.all(
+        commands.map(async (command, agent) => {
+          const response = await agentExecute(
+            request,
+            canvasId,
+            [command(round)],
+            { threadId: `thread-e2e-agent-${agent}` },
+          );
+          const body = response.ok()
+            ? ((await response.json()) as AgentExecuteResponse)
+            : undefined;
+          return {
+            status: response.status(),
+            applied: body?.results.map((result) => result.applied) ?? [],
+          };
+        }),
+      ),
+    );
+  };
+  /** Page A has applied everything the server has committed. */
+  const aCaughtUp = async () => {
+    await expect(async () => {
+      const { version } = await serverRecord(request, canvasId);
+      expect((await storeState(a.page)).version, 'A version').toBe(version);
+    }).toPass();
+  };
 
-  // The person works while the Agents write.
+  // Round 1 lands while A holds a body the server does not have: the save
+  // is kept from leaving the page until the round has reached A.
   const body = 'Body typed while three Agents were writing';
-  await editBody(a.page, X, body);
-  const yMoved = await dragNode(a.page, Y, 120, 60);
-  const agentOutcomes = await agents;
+  let releaseSave = () => {};
+  const saveHeld = new Promise<void>((resolve) => {
+    releaseSave = resolve;
+  });
+  const contentSave = (url: URL) =>
+    url.pathname.endsWith(`/nodes/${X}/content`);
+  await a.page.route(contentSave, async (route) => {
+    if (route.request().method() !== 'GET') await saveHeld;
+    await route.continue();
+  });
+  await selectNode(a.page, X);
+  await a.page.getByRole('button', { name: 'Expand', exact: true }).click();
+  const editor = a.page.locator(
+    '[data-search-scope="node"] .ProseMirror[contenteditable="true"]',
+  );
+  await expect(editor).toHaveCount(1);
+  await editor.fill(body);
+  await expect
+    .poll(async () => (await storeState(a.page)).pendingContent, {
+      message: 'the typed body is unsaved',
+    })
+    .toContain(X);
+  await agentRound(1);
+  await aCaughtUp();
+  const whileUnsaved = await storeState(a.page);
+  const serverWhileUnsaved = await serverRecord(request, canvasId);
+  releaseSave();
+  await a.page
+    .getByRole('tab', { selected: true })
+    .getByRole('button', { name: /^Close / })
+    .click();
+  await expect(editor).toHaveCount(0);
+  await a.page.unroute(contentSave);
+
+  // Round 2 lands while A's mouse button is down on the note it drags.
+  const node = a.page.locator(`.react-flow__node[data-id="${Y}"]`);
+  const rect = await node.boundingBox();
+  if (!rect) throw new Error(`Node ${Y} is not visible`);
+  const start = { x: rect.x + rect.width / 2, y: rect.y + 12 };
+  await a.page.mouse.move(start.x, start.y);
+  await a.page.mouse.down();
+  await a.page.mouse.move(start.x + 60, start.y + 30, { steps: 6 });
+  const yMidDrag = await domPosition(a.page, Y);
+  await agentRound(2);
+  await aCaughtUp();
+  const whileDragging = await storeState(a.page);
+  const yAfterRound = await domPosition(a.page, Y);
+  await a.page.mouse.move(start.x + 120, start.y + 60, { steps: 6 });
+  await a.page.mouse.up();
+  const yMoved = await domPosition(a.page, Y);
+  if (!yMoved) throw new Error(`Node ${Y} disappeared while dragging`);
+
+  // The remaining rounds follow with nothing held.
+  for (let round = 3; round <= AGENT_ROUNDS; round += 1)
+    await agentRound(round);
 
   await waitForServerPosition(request, canvasId, Y, {
     x: Math.round(yMoved.x),
@@ -1014,6 +1121,15 @@ async function parallelAgentsScenario(
   const bState = await storeState(b.page);
   const result = {
     agentOutcomes,
+    // What A held when round 1 reached it.
+    unsavedWhenRoundOneArrived: whileUnsaved.pendingContent,
+    aBodyWhileUnsaved: whileUnsaved.content[X]?.trim(),
+    aNodeCountWhileUnsaved: whileUnsaved.order.length,
+    serverBodyWhileUnsaved: serverWhileUnsaved.node(X)?.data.content?.trim(),
+    // What A showed when round 2 reached it, mid-drag.
+    aNodeCountWhileDragging: whileDragging.order.length,
+    yMidDrag,
+    yAfterRound,
     versionBefore,
     serverVersion: server.version,
     zFinal,
@@ -1032,9 +1148,10 @@ async function parallelAgentsScenario(
     aFailedCalls: a.calls.filter((call) => (call.status ?? 0) >= 400),
     bFailedCalls: b.calls.filter((call) => (call.status ?? 0) >= 400),
     reloaded: [await wasReloaded(a.page), await wasReloaded(b.page)],
-    toasts:
-      (await a.page.getByText(SYNC_TROUBLE_TOAST).count()) +
-      (await b.page.getByText(SYNC_TROUBLE_TOAST).count()),
+    troubleSeen: [
+      ...(await syncTroubleSeen(a.page)),
+      ...(await syncTroubleSeen(b.page)),
+    ],
   };
   await evidence(testInfo, result);
   await closeBoth(a, b);
@@ -1413,19 +1530,34 @@ test('current: (g) an execute request moves the node on both pages without a rel
 
 // ─── (k) several Agents at once ─────────────────────────────────────────────
 
-test('(k) three Agents writing at once while a person types and drags: every write lands and no page reloads or warns', async ({
+test('(k) three Agents writing at once over an unsaved body and a drag in progress: every write lands and no page reloads or warns', async ({
   browser,
   request,
 }, testInfo) => {
   const result = await parallelAgentsScenario(browser, request, testInfo);
   // Every Agent write was accepted and applied.
-  for (const outcomes of result.agentOutcomes) {
-    expect(outcomes).toHaveLength(AGENT_ROUNDS);
-    for (const outcome of outcomes) {
+  expect(result.agentOutcomes).toHaveLength(AGENT_ROUNDS);
+  for (const round of result.agentOutcomes) {
+    expect(round).toHaveLength(3);
+    for (const outcome of round) {
       expect(outcome.status).toBe(200);
       expect(outcome.applied).toEqual([true]);
     }
   }
+  // Round 1 reached A while its body was unsaved: A took the Agents' node
+  // and kept its text, which the server did not have yet.
+  expect(result.unsavedWhenRoundOneArrived).toContain(X);
+  expect(result.aNodeCountWhileUnsaved).toBe(3 + 1);
+  expect(result.aBodyWhileUnsaved).toBe(
+    'Body typed while three Agents were writing',
+  );
+  expect(result.serverBodyWhileUnsaved).not.toBe(
+    'Body typed while three Agents were writing',
+  );
+  // Round 2 reached A mid-drag: A took it and the dragged note stayed
+  // under the pointer.
+  expect(result.aNodeCountWhileDragging).toBe(3 + 2);
+  expect(result.yAfterRound).toEqual(result.yMidDrag);
   // Each Agent write and the person's drag made a version of their own.
   expect(result.serverVersion).toBeGreaterThanOrEqual(
     result.versionBefore + 3 * AGENT_ROUNDS + 1,
@@ -1450,5 +1582,5 @@ test('(k) three Agents writing at once while a person types and drags: every wri
   expect(result.aFailedCalls).toEqual([]);
   expect(result.bFailedCalls).toEqual([]);
   expect(result.reloaded).toEqual([false, false]);
-  expect(result.toasts).toBe(0);
+  expect(result.troubleSeen).toEqual([]);
 });
