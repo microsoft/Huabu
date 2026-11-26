@@ -8,14 +8,14 @@
 
 const IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp'];
 const VIDEO_EXTS = ['mp4', 'webm', 'ogg', 'mov'];
+const AUDIO_EXTS = ['mp3', 'wav', 'm4a', 'aac', 'flac', 'oga'];
 const OFFICE_EXTS = ['docx', 'pptx', 'xlsx'];
 
 /** Map an Office file extension onto the canonical `OfficeFormat` value. */
 export const detectOfficeFormat = (
   filename: string,
 ): 'docx' | 'pptx' | 'xlsx' | null => {
-  const cleanPath = filename.split('?')[0].split('#')[0];
-  const ext = cleanPath.split('.').pop()?.toLowerCase();
+  const ext = filename.split('.').pop()?.toLowerCase();
   if (ext === 'docx') return 'docx';
   if (ext === 'pptx') return 'pptx';
   if (ext === 'xlsx') return 'xlsx';
@@ -31,42 +31,41 @@ const PDF_URL_PATTERNS: RegExp[] = [
   /^https?:\/\/arxiv\.org\/pdf\//i,
 ];
 
-/**
- * Classify a filename or URL into a canvas node type based on file extension.
- * Strips query strings and hashes before checking.
- * Also matches known PDF-serving URL patterns for extensionless PDF URLs.
- */
-export const detectNodeType = (
-  filename: string,
-): 'image' | 'pdf' | 'office' | 'video' | 'note' | 'web' => {
-  if (PDF_URL_PATTERNS.some((pattern) => pattern.test(filename))) return 'pdf';
+type FileNodeType =
+  | 'image'
+  | 'pdf'
+  | 'office'
+  | 'video'
+  | 'audio'
+  | 'note'
+  | 'web';
 
-  const cleanPath = filename.split('?')[0].split('#')[0];
-  const ext = cleanPath.split('.').pop()?.toLowerCase();
+/** Classify a name by its extension; `null` when the extension is unknown. */
+const detectTypeFromExtension = (name: string): FileNodeType | null => {
+  const ext = name.split('.').pop()?.toLowerCase();
 
-  if (!ext) return 'web';
+  if (!ext) return null;
   if (IMAGE_EXTS.includes(ext)) return 'image';
   if (ext === 'pdf') return 'pdf';
   if (OFFICE_EXTS.includes(ext)) return 'office';
   if (ext === 'md' || ext === 'markdown') return 'note';
   if (VIDEO_EXTS.includes(ext)) return 'video';
+  if (AUDIO_EXTS.includes(ext)) return 'audio';
   // Local .html / .htm files are surfaced as web nodes — the uploader
   // stores them as an artifact and the preprocessing pipeline extracts
-  // their content the same way it does for remote URLs.
+  // their content the same way it does for remote URLs. A saved .mhtml is
+  // left out: preprocessing would read the raw archive as HTML.
   if (ext === 'html' || ext === 'htm') return 'web';
-  return 'web';
+  return null;
 };
 
-/**
- * Classify a MIME type string into a canvas node type.
- */
-export const detectNodeTypeFromMime = (
-  mimeType: string,
-): 'image' | 'pdf' | 'office' | 'video' | 'note' | 'web' => {
+/** Classify a MIME type; `null` when no node type renders it. */
+const detectTypeFromMime = (mimeType: string): FileNodeType | null => {
   if (mimeType.startsWith('image/')) return 'image';
   if (mimeType === 'application/pdf') return 'pdf';
   if (mimeType === 'text/markdown') return 'note';
   if (mimeType.startsWith('video/')) return 'video';
+  if (mimeType.startsWith('audio/')) return 'audio';
   if (mimeType === 'text/html') return 'web';
   // Modern Office (OOXML) MIME types.
   if (
@@ -79,8 +78,33 @@ export const detectNodeTypeFromMime = (
   ) {
     return 'office';
   }
-  return 'web';
+  return null;
 };
+
+/**
+ * Classify a URL into a canvas node type based on file extension.
+ * Strips query strings and hashes before checking.
+ * Also matches known PDF-serving URL patterns for extensionless PDF URLs.
+ * Anything unrecognised is a web page; so is a remote audio file, because
+ * an audio node only plays an uploaded artifact.
+ */
+export const detectNodeType = (
+  url: string,
+): 'image' | 'pdf' | 'office' | 'video' | 'note' | 'web' => {
+  if (PDF_URL_PATTERNS.some((pattern) => pattern.test(url))) return 'pdf';
+  const type = detectTypeFromExtension(url.split('?')[0].split('#')[0]);
+  return !type || type === 'audio' ? 'web' : type;
+};
+
+/**
+ * Classify a local file into a canvas node type, or `null` when no node
+ * type can hold it. MIME wins; the filename decides when the MIME is absent
+ * or unrecognised (e.g. `.md` reported as `text/plain`).
+ */
+export const detectFileNodeType = (
+  file: Pick<File, 'name' | 'type'>,
+): FileNodeType | null =>
+  detectTypeFromMime(file.type) ?? detectTypeFromExtension(file.name);
 
 const URL_PATTERN =
   /^(https?:\/\/[^\s]+|[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z]{2,})+([/?#][^\s]*)?)$/i;

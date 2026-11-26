@@ -3,13 +3,19 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { uploadPdf } from '@/api/artifact';
+import {
+  uploadAudio,
+  uploadHtml,
+  uploadOffice,
+  uploadPdf,
+} from '@/api/artifact';
 import { toast } from '@/components/Common/Toast';
 import { pageLifecycle } from '@/utils/pageLifecycle';
 
 import { importFilesAsNodes } from './nodeInputBuilders';
 
 vi.mock('@/api/artifact', () => ({
+  uploadAudio: vi.fn(),
   uploadPdf: vi.fn(),
   uploadImage: vi.fn(),
   uploadVideo: vi.fn(),
@@ -18,7 +24,10 @@ vi.mock('@/api/artifact', () => ({
 }));
 vi.mock('@/components/Common/Toast', () => ({ toast: vi.fn() }));
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.clearAllMocks();
+});
 
 describe('file import lifecycle', () => {
   it('waits for upload and node insertion before the final save', async () => {
@@ -112,5 +121,88 @@ describe('file import lifecycle', () => {
     ]);
     expect(toast).toHaveBeenCalledWith('Upload offline', { tone: 'danger' });
     log.mockRestore();
+  });
+
+  it.each([
+    ['song.mp3', 'audio/mpeg'],
+    ['song.mp3', ''],
+    ['song#1.mp3', ''],
+  ])('imports %s (type "%s") as an audio node', async (name, type) => {
+    vi.mocked(uploadAudio).mockResolvedValueOnce('artifact.mp3');
+    const addNodes = vi.fn();
+    await importFilesAsNodes(
+      [new File(['audio'], name, { type })],
+      { x: 0, y: 0 },
+      { type: 'user-uploaded' },
+      'space',
+      addNodes,
+    );
+    expect(addNodes).toHaveBeenCalledWith([
+      expect.objectContaining({
+        nodeType: 'audio',
+        data: expect.objectContaining({ src: 'artifact.mp3', label: name }),
+      }),
+    ]);
+    expect(uploadHtml).not.toHaveBeenCalled();
+  });
+
+  it('imports an html file whose name contains # as a web node', async () => {
+    vi.mocked(uploadHtml).mockResolvedValueOnce('artifact.html');
+    const addNodes = vi.fn();
+    await importFilesAsNodes(
+      [new File(['page'], 'page#1.html', { type: '' })],
+      undefined,
+      { type: 'user-uploaded' },
+      'space',
+      addNodes,
+    );
+    expect(addNodes).toHaveBeenCalledWith([
+      expect.objectContaining({ nodeType: 'web' }),
+    ]);
+    expect(toast).not.toHaveBeenCalled();
+  });
+
+  it('reads the Office format from a file name that contains #', async () => {
+    vi.mocked(uploadOffice).mockResolvedValueOnce('artifact.xlsx');
+    const addNodes = vi.fn();
+    await importFilesAsNodes(
+      [new File(['sheet'], 'sheet#1.xlsx', { type: '' })],
+      undefined,
+      { type: 'user-uploaded' },
+      'space',
+      addNodes,
+    );
+    expect(addNodes).toHaveBeenCalledWith([
+      expect.objectContaining({
+        nodeType: 'office',
+        data: expect.objectContaining({ format: 'xlsx' }),
+      }),
+    ]);
+  });
+
+  it('names the files it cannot import and still imports the rest', async () => {
+    vi.mocked(uploadPdf).mockResolvedValueOnce('artifact.pdf');
+    const addNodes = vi.fn();
+    await importFilesAsNodes(
+      [
+        new File(['zip'], 'archive.zip', { type: 'application/zip' }),
+        new File(['page'], 'saved.mhtml', { type: 'message/rfc822' }),
+        new File(['pdf'], 'document.pdf', { type: 'application/pdf' }),
+      ],
+      undefined,
+      { type: 'user-uploaded' },
+      'space',
+      addNodes,
+    );
+    expect(addNodes).toHaveBeenCalledWith([
+      expect.objectContaining({ nodeType: 'pdf' }),
+    ]);
+    expect(uploadHtml).not.toHaveBeenCalled();
+    expect(toast).toHaveBeenCalledWith(
+      expect.stringContaining('archive.zip, saved.mhtml'),
+      {
+        tone: 'danger',
+      },
+    );
   });
 });
