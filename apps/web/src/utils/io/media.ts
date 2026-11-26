@@ -9,6 +9,7 @@
 const IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp'];
 const VIDEO_EXTS = ['mp4', 'webm', 'ogg', 'mov'];
 const AUDIO_EXTS = ['mp3', 'wav', 'm4a', 'aac', 'flac', 'oga'];
+const WEB_EXTS = ['html', 'htm', 'mhtml'];
 const OFFICE_EXTS = ['docx', 'pptx', 'xlsx'];
 
 /** Map an Office file extension onto the canonical `OfficeFormat` value. */
@@ -41,10 +42,9 @@ type FileNodeType =
   | 'note'
   | 'web';
 
-/** Classify a path by its extension; `null` when the extension is unknown. */
-const detectTypeFromExtension = (path: string): FileNodeType | null => {
-  const cleanPath = path.split('?')[0].split('#')[0];
-  const ext = cleanPath.split('.').pop()?.toLowerCase();
+/** Classify a name by its extension; `null` when the extension is unknown. */
+const detectTypeFromExtension = (name: string): FileNodeType | null => {
+  const ext = name.split('.').pop()?.toLowerCase();
 
   if (!ext) return null;
   if (IMAGE_EXTS.includes(ext)) return 'image';
@@ -53,10 +53,10 @@ const detectTypeFromExtension = (path: string): FileNodeType | null => {
   if (ext === 'md' || ext === 'markdown') return 'note';
   if (VIDEO_EXTS.includes(ext)) return 'video';
   if (AUDIO_EXTS.includes(ext)) return 'audio';
-  // Local .html / .htm files are surfaced as web nodes — the uploader
-  // stores them as an artifact and the preprocessing pipeline extracts
-  // their content the same way it does for remote URLs.
-  if (ext === 'html' || ext === 'htm') return 'web';
+  // Local .html / .htm files and saved .mhtml snapshots are surfaced as web
+  // nodes — the uploader stores them as an artifact and the preprocessing
+  // pipeline extracts their content the same way it does for remote URLs.
+  if (WEB_EXTS.includes(ext)) return 'web';
   return null;
 };
 
@@ -93,7 +93,7 @@ export const detectNodeType = (
   url: string,
 ): 'image' | 'pdf' | 'office' | 'video' | 'note' | 'web' => {
   if (PDF_URL_PATTERNS.some((pattern) => pattern.test(url))) return 'pdf';
-  const type = detectTypeFromExtension(url);
+  const type = detectTypeFromExtension(url.split('?')[0].split('#')[0]);
   return !type || type === 'audio' ? 'web' : type;
 };
 

@@ -19,7 +19,10 @@ vi.mock('@/api/artifact', () => ({
 }));
 vi.mock('@/components/Common/Toast', () => ({ toast: vi.fn() }));
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.clearAllMocks();
+});
 
 describe('file import lifecycle', () => {
   it('waits for upload and node insertion before the final save', async () => {
@@ -118,6 +121,7 @@ describe('file import lifecycle', () => {
   it.each([
     ['song.mp3', 'audio/mpeg'],
     ['song.mp3', ''],
+    ['song#1.mp3', ''],
   ])('imports %s (type "%s") as an audio node', async (name, type) => {
     vi.mocked(uploadAudio).mockResolvedValueOnce('artifact.mp3');
     const addNodes = vi.fn();
@@ -135,6 +139,25 @@ describe('file import lifecycle', () => {
       }),
     ]);
     expect(uploadHtml).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['saved page.mhtml', 'message/rfc822'],
+    ['page#1.html', ''],
+  ])('imports %s (type "%s") as a web node', async (name, type) => {
+    vi.mocked(uploadHtml).mockResolvedValueOnce('artifact.html');
+    const addNodes = vi.fn();
+    await importFilesAsNodes(
+      [new File(['page'], name, { type })],
+      undefined,
+      { type: 'user-uploaded' },
+      'space',
+      addNodes,
+    );
+    expect(addNodes).toHaveBeenCalledWith([
+      expect.objectContaining({ nodeType: 'web' }),
+    ]);
+    expect(toast).not.toHaveBeenCalled();
   });
 
   it('names the files it cannot import and still imports the rest', async () => {
