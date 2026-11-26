@@ -29,7 +29,11 @@ import {
   recentCanvasConversationParamsSchema,
   deleteNodeParamsSchema,
 } from '@huabu/shared';
-import { nodeRevisionOf, hidePdfNotes } from '@huabu/shared/canvas-engine';
+import {
+  MD_BACKED_NODE_TYPES,
+  nodeRevisionOf,
+  hidePdfNotes,
+} from '@huabu/shared/canvas-engine';
 
 import {
   associateAgentNode,
@@ -47,7 +51,7 @@ import {
   applyDeltasOnServer,
   executeOnServer,
   toExecuteResponse,
-  toWirePendingEffects,
+  canvasUpdateOf,
 } from './canvas-executor.js';
 import { searchCanvas } from './canvas-search.js';
 import { publishCanvasUpdate } from './canvas-sync.js';
@@ -215,37 +219,6 @@ function openInFileManager(targetPath: string): void {
     // Rare synchronous spawn throw (EMFILE / ENOMEM). Best-effort.
   }
 }
-
-/**
- * Node types that have a sibling `nodes/<safe(label)>.md`. The body is
- * markdown content for note/text/web/pdf and empty for
- * image/video/frame/question/sketch (which only carry frontmatter).
- *
- * `question` is included so its auto-generated label / labelSource
- * (written by the preprocess pipeline via `patchNodeSilent` on the
- * client) survives canvas reloads — structure writes strip those
- * fields, so the sidecar is the only persistence path.
- *
- * `sketch` is included for the same reason: the canvas engine
- * auto-stamps a `Sketch N` label on `CREATE_NODES` and the user can
- * rename it from the layer panel. Stroke geometry stays in structural
- * state; only the label / labelSource live in the sidecar's
- * frontmatter.
- */
-const MD_BACKED_NODE_TYPES = new Set([
-  'fileReference',
-  'note',
-  'text',
-  'web',
-  'pdf',
-  'office',
-  'image',
-  'video',
-  'audio',
-  'frame',
-  'question',
-  'sketch',
-]);
 
 /**
  * Subset of text-bearing nodes whose `data.content` is
@@ -1590,18 +1563,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           originator: { source: 'ui' },
         });
         if (out.toVersion > out.fromVersion) {
-          publishCanvasUpdate(canvasId, {
-            type: 'update',
-            data: {
-              fromVersion: out.fromVersion,
-              toVersion: out.toVersion,
-              deltas: out.deltas,
-              pendingEffects: toWirePendingEffects(out.pendingEffects),
-              ...(out.nodeContentRevisions
-                ? { nodeContentRevisions: out.nodeContentRevisions }
-                : {}),
-            },
-          });
+          publishCanvasUpdate(canvasId, canvasUpdateOf(out));
         }
       } catch (err) {
         if (err instanceof CanvasNotFoundError) {
