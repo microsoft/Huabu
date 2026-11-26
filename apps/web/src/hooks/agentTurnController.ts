@@ -23,7 +23,6 @@ import {
 
 import { AgentTurnFailedError, ApiError } from '@/api/_client';
 import { agentApi, type AgentStreamCallbacks } from '@/api/agent';
-import { i18n } from '@/i18n';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
 import useCanvasStore, {
   saveCanvasForSubmission,
@@ -1384,18 +1383,13 @@ async function executePreparedAgentTurn(
     // Set once this send has ended. A sink that outlives it belongs to a send
     // whose delivery is being confirmed.
     let ended = false;
-    let confirmingStatusId: string | undefined;
-    /** Drop the local copy of a send that is no longer shown as its own row. */
-    const removeLocalAttempt = () => {
-      const chat = useChatStore.getState();
-      chat.setMessages(
-        threadId,
-        selectThreadMessages(chat, threadId).filter(
-          (message) =>
-            message.id !== userMessageId && message.id !== confirmingStatusId,
-        ),
-      );
-    };
+    /** Record on the sent message what is known of its delivery. */
+    const markDelivery = (delivery: 'confirming' | 'undelivered') =>
+      useChatStore
+        .getState()
+        .updateMessage(threadId, userMessageId, (message) =>
+          message.role === 'user' ? { ...message, delivery } : message,
+        );
     /** Report a send that got no answer from the server at all. */
     const reportUnanswered = () => {
       if (!navigator.onLine) {
@@ -1406,30 +1400,18 @@ async function executePreparedAgentTurn(
           removeThreadMessage(threadId, userMessageId);
           return;
         }
-        addMessage(threadId, {
-          id: createId('status'),
-          role: 'status',
-          status: 'error',
-          localOnly: true,
-          detail: i18n.t('chat.sendNotDelivered'),
-        });
+        markDelivery('undelivered');
         return;
       }
       result.status = 'unknown';
-      confirmingStatusId = createId('status');
-      addMessage(threadId, {
-        id: confirmingStatusId,
-        role: 'status',
-        status: 'confirming',
-        localOnly: true,
-      });
+      markDelivery('confirming');
     };
     const acceptTurn = (accepted: AgentTurnAcceptance) => {
       if (result.accepted) return;
       result.accepted = accepted;
       // Confirmed after the send ended: history holds the turn, so the local
       // copy gives way to it.
-      if (ended) removeLocalAttempt();
+      if (ended) removeThreadMessage(threadId, userMessageId);
       if (isComposingQuestion && !serverSettingsConfirmed) {
         serverSettingsConfirmed = true;
         useChatStore.getState().makeThreadMetadataEphemeral(threadId);
@@ -1450,22 +1432,9 @@ async function executePreparedAgentTurn(
           // Confirmed as never received. A queued item is back in the queue;
           // a direct send stays where it is, marked for the user to resend.
           useChatStore.getState().setQueuePaused(threadId, true);
-          if (callbacks.queuedTurnId) removeLocalAttempt();
-          else {
-            const chat = useChatStore.getState();
-            chat.setMessages(
-              threadId,
-              selectThreadMessages(chat, threadId).map((message) =>
-                message.id === confirmingStatusId && message.role === 'status'
-                  ? {
-                      ...message,
-                      status: 'error',
-                      detail: i18n.t('chat.sendNotDelivered'),
-                    }
-                  : message,
-              ),
-            );
-          }
+          if (callbacks.queuedTurnId)
+            removeThreadMessage(threadId, userMessageId);
+          else markDelivery('undelivered');
         }
         callbacks.onAcceptanceRejected?.();
       },
@@ -2038,9 +2007,7 @@ async function drainAgentTurnQueue(
             continue;
           }
           if (result.status === 'unknown') {
-            useChatStore
-              .getState()
-              .setQueuedTurnStatus(threadId, next.id, 'uncertain');
+            // It stays marked as being sent until its delivery is confirmed.
             useChatStore.getState().setQueuePaused(threadId, true);
             return;
           }

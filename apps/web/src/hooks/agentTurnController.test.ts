@@ -647,9 +647,13 @@ describe('queued composer turns', () => {
         settleAgentTurnQueue(session);
         await vi.waitFor(() =>
           expect(
-            useChatStore.getState().threadsById[session.threadId].queuedTurns[0]
-              .status,
-          ).toBe('uncertain'),
+            useChatStore.getState().threadsById[session.threadId],
+          ).toMatchObject({
+            queuePaused: true,
+            queuedTurns: expect.arrayContaining([
+              expect.objectContaining({ status: 'sending' }),
+            ]),
+          }),
         );
         resumeAgentTurnQueue(session);
       });
@@ -778,9 +782,13 @@ describe('queued composer turns', () => {
         resumeAgentTurnQueue(session);
         await vi.waitFor(() =>
           expect(
-            useChatStore.getState().threadsById[session.threadId].queuedTurns[0]
-              .status,
-          ).toBe('uncertain'),
+            useChatStore.getState().threadsById[session.threadId],
+          ).toMatchObject({
+            queuePaused: true,
+            queuedTurns: expect.arrayContaining([
+              expect.objectContaining({ status: 'sending' }),
+            ]),
+          }),
         );
       });
       const requestId = mocks.stream.mock.calls[0][4].requestId;
@@ -792,7 +800,7 @@ describe('queued composer turns', () => {
           selectThreadMessages(useChatStore.getState(), session.threadId).at(
             -1,
           ),
-        ).toMatchObject({ role: 'status', status: 'confirming' });
+        ).toMatchObject({ role: 'user', delivery: 'confirming' });
       }
       mocks.stop.mockResolvedValueOnce({
         stopped: false,
@@ -959,11 +967,7 @@ describe('queued composer turns', () => {
       useChatStore.getState().setHistoryLoaded(session.threadId, true);
       expect(
         selectThreadMessages(useChatStore.getState(), session.threadId).at(-1),
-      ).toMatchObject({
-        role: 'status',
-        status: 'confirming',
-        localOnly: true,
-      });
+      ).toMatchObject({ role: 'user', delivery: 'confirming' });
       const requestId = mocks.stream.mock.calls[0][4].requestId;
       mocks.stop.mockResolvedValueOnce({
         stopped: false,
@@ -1008,9 +1012,13 @@ describe('queued composer turns', () => {
         resumeAgentTurnQueue(session);
         await vi.waitFor(() =>
           expect(
-            useChatStore.getState().threadsById[session.threadId].queuedTurns[0]
-              .status,
-          ).toBe('uncertain'),
+            useChatStore.getState().threadsById[session.threadId],
+          ).toMatchObject({
+            queuePaused: true,
+            queuedTurns: expect.arrayContaining([
+              expect.objectContaining({ status: 'sending' }),
+            ]),
+          }),
         );
       });
       if (failure === 'offline')
@@ -1031,7 +1039,7 @@ describe('queued composer turns', () => {
       expect(
         useChatStore.getState().threadsById[session.threadId].queuedTurns[0]
           .status,
-      ).toBe('uncertain');
+      ).toBe('sending');
       expect(mocks.stream).toHaveBeenCalledOnce();
     },
   );
@@ -1096,9 +1104,13 @@ describe('queued composer turns', () => {
         resumeAgentTurnQueue(session);
         await vi.waitFor(() =>
           expect(
-            useChatStore.getState().threadsById[session.threadId].queuedTurns[0]
-              .status,
-          ).toBe('uncertain'),
+            useChatStore.getState().threadsById[session.threadId],
+          ).toMatchObject({
+            queuePaused: true,
+            queuedTurns: expect.arrayContaining([
+              expect.objectContaining({ status: 'sending' }),
+            ]),
+          }),
         );
       });
       const requestId = mocks.stream.mock.calls[0][4].requestId;
@@ -1305,9 +1317,13 @@ describe('queued composer turns', () => {
       resumeAgentTurnQueue(session);
       await vi.waitFor(() =>
         expect(
-          useChatStore.getState().threadsById[session.threadId].queuedTurns[0]
-            .status,
-        ).toBe('uncertain'),
+          useChatStore.getState().threadsById[session.threadId],
+        ).toMatchObject({
+          queuePaused: true,
+          queuedTurns: expect.arrayContaining([
+            expect.objectContaining({ status: 'sending' }),
+          ]),
+        }),
       );
     });
     mocks.stop.mockRejectedValueOnce(new Error('Still offline'));
@@ -1315,7 +1331,7 @@ describe('queued composer turns', () => {
     expect(
       useChatStore.getState().threadsById[session.threadId].queuedTurns[0]
         .status,
-    ).toBe('uncertain');
+    ).toBe('sending');
     expect(mocks.stream).toHaveBeenCalledOnce();
   });
 
@@ -3613,16 +3629,11 @@ describe('shared Agent turn input', () => {
       await act(async () => hook.startStream('Hello', 'operate'));
       const thread = useChatStore.getState().threadsById[session.threadId];
       expect(thread.draft).toBe('');
-      expect(thread.messages.slice(-2)).toMatchObject([
-        { role: 'user', content: 'Hello' },
-        {
-          role: 'status',
-          status: 'error',
-          localOnly: true,
-          detail:
-            'The message was not sent. Check your connection and send it again.',
-        },
-      ]);
+      expect(thread.messages.at(-1)).toMatchObject({
+        role: 'user',
+        content: 'Hello',
+        delivery: 'undelivered',
+      });
       // The request never left, so nothing holds the next send.
       mocks.stream.mockImplementationOnce(
         async (_content, threadId, _mode, callbacks: AgentStreamCallbacks) => {
@@ -3664,10 +3675,11 @@ describe('shared Agent turn input', () => {
           useChatStore.getState().threadsById[session.threadId];
         // The composer is left alone; the message waits where it was sent.
         expect(thread().draft).toBe('');
-        expect(thread().messages.slice(-2)).toMatchObject([
-          { role: 'user', content: 'Hello' },
-          { role: 'status', status: 'confirming', localOnly: true },
-        ]);
+        expect(thread().messages.at(-1)).toMatchObject({
+          role: 'user',
+          content: 'Hello',
+          delivery: 'confirming',
+        });
         if (received) {
           act(() =>
             observeAgentTurnAcceptance('canvas-1', {
@@ -3698,16 +3710,11 @@ describe('shared Agent turn input', () => {
           );
           // Never received: it stays in place, marked for the user to resend,
           // and the queue waits for that decision.
-          expect(thread().messages.slice(-2)).toMatchObject([
-            { role: 'user', content: 'Hello' },
-            {
-              role: 'status',
-              status: 'error',
-              localOnly: true,
-              detail:
-                'The message was not sent. Check your connection and send it again.',
-            },
-          ]);
+          expect(thread().messages.at(-1)).toMatchObject({
+            role: 'user',
+            content: 'Hello',
+            delivery: 'undelivered',
+          });
           expect(thread().queuePaused).toBe(true);
         }
         expect(thread().draft).toBe('');

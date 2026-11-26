@@ -108,15 +108,6 @@ function ScrollPlaceholder({
 
 const VIRTUAL_COMPONENTS = { ScrollSeekPlaceholder: ScrollPlaceholder };
 
-type StatusRow = Extract<ChatMessage, { role: 'status' }>;
-/** What the list draws: every message but the delivery-confirmation marker. */
-type ShownMessage =
-  | Exclude<ChatMessage, StatusRow>
-  | (StatusRow & { status: Exclude<StatusRow['status'], 'confirming'> });
-function isShownMessage(message: ChatMessage): message is ShownMessage {
-  return !(message.role === 'status' && message.status === 'confirming');
-}
-
 export const MessageList = memo(function MessageList(props: MessageListProps) {
   // A different thread must never inherit another thread's virtual measurements.
   return (
@@ -126,7 +117,7 @@ export const MessageList = memo(function MessageList(props: MessageListProps) {
 
 function VirtualMessageList({
   onLatestVisibleChange,
-  messages: allMessages,
+  messages,
   activationId,
   threadId,
   isLoading,
@@ -149,12 +140,6 @@ function VirtualMessageList({
   openPositionRequestNonce,
   onOpenPositionHandled,
 }: MessageListProps) {
-  // A send whose delivery is being confirmed looks like one still in flight:
-  // its marker row is not shown, only the working indicator.
-  const messages = useMemo(
-    () => allMessages.filter(isShownMessage),
-    [allMessages],
-  );
   const { t } = useTranslation();
   const list = useRef<VirtuosoHandle>(null);
   const [scroller, setScroller] = useState<HTMLElement | null>(null);
@@ -1027,17 +1012,26 @@ function VirtualMessageList({
         className={`flow-root pb-1 ${CONTENT_INSET}`}
       >
         {message.role === 'user' ? (
-          <UserMessage
-            content={message.content}
-            isFirst={id === ids[0]}
-            quotedComments={message.quotedComments}
-            inputKind={message.inputKind}
-            inkInterpretation={message.inkInterpretation}
-            attachments={message.attachments}
-            selectedNodeIds={message.selectedNodeIds}
-            selectedStrokeIds={message.selectedStrokeIds}
-            invokedSkills={message.invokedSkills}
-          />
+          <>
+            <UserMessage
+              content={message.content}
+              isFirst={id === ids[0]}
+              quotedComments={message.quotedComments}
+              inputKind={message.inputKind}
+              inkInterpretation={message.inkInterpretation}
+              attachments={message.attachments}
+              selectedNodeIds={message.selectedNodeIds}
+              selectedStrokeIds={message.selectedStrokeIds}
+              invokedSkills={message.invokedSkills}
+            />
+            {message.delivery === 'undelivered' ? (
+              <StatusMessage
+                status="error"
+                detail={t('chat.sendNotDelivered')}
+                onRetry={onRetry && (() => onRetry(message))}
+              />
+            ) : null}
+          </>
         ) : message.role === 'assistant' ? (
           <AIMessage
             messageId={id}

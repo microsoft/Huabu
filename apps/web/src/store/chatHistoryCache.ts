@@ -26,68 +26,44 @@ export function isProtectedHistoryMessage(message: ChatMessage): boolean {
 }
 
 /**
- * Whether the message at `index` is one the user sent that never reached the
- * server: a local user message followed by a local-only status. History has no
- * turn for it, so nothing will ever replace it.
+ * Carry the messages the page sent and has no turn for from `current` into
+ * `next`, a transcript rebuilt from server history. Each keeps its place:
+ * directly after the last persisted turn that preceded it, or first when that
+ * turn is no longer loaded. One whose delivery is still being confirmed gives
+ * way to a newer turn in history.
  */
-export function isUndeliveredMessage(
-  messages: readonly ChatMessage[],
-  index: number,
-): boolean {
-  const message = messages[index];
-  const status = messages[index + 1];
-  return (
-    message?.role === 'user' &&
-    !message.historyTurnId &&
-    status?.role === 'status' &&
-    status.localOnly === true
-  );
-}
-
-/**
- * Carry undelivered messages from `current` into `next`, a transcript rebuilt
- * from server history. Each keeps its place: directly after the last persisted
- * turn that preceded it, or first when that turn is no longer loaded. One whose
- * delivery is still being confirmed gives way to a newer turn in history.
- */
-export function keepUndeliveredMessages(
+export function keepUnsentMessages(
   current: readonly ChatMessage[],
   next: ChatMessage[],
 ): ChatMessage[] {
   const present = new Set(next.map((message) => message.id));
-  const groups: { after?: string; messages: ChatMessage[] }[] = [];
+  const kept: { after?: string; message: ChatMessage }[] = [];
   let lastTurn: string | undefined;
-  for (let index = 0; index < current.length; index += 1) {
-    const message = current[index];
-    if (!message) continue;
+  for (const message of current) {
     if (message.historyTurnId) lastTurn = message.historyTurnId;
-    const status = current[index + 1];
-    if (!status || !isUndeliveredMessage(current, index)) continue;
-    if (!present.has(message.id))
-      groups.push({ after: lastTurn, messages: [message, status] });
-    index += 1;
+    if (message.role === 'user' && message.delivery && !present.has(message.id))
+      kept.push({ after: lastTurn, message });
   }
-  if (groups.length === 0) return next;
+  if (kept.length === 0) return next;
   const result = [...next];
-  // Later groups go in first so that earlier ones end up ahead of them.
-  for (const group of groups.reverse()) {
+  // Later ones go in first so that earlier ones end up ahead of them.
+  for (const { after, message } of kept.reverse()) {
     let anchor = result.length - 1;
     while (
       anchor >= 0 &&
-      (group.after === undefined ||
-        result[anchor]?.historyTurnId !== group.after)
+      (after === undefined || result[anchor]?.historyTurnId !== after)
     )
       anchor -= 1;
     // A send still being confirmed that history now follows with a newer turn
     // is taken to be that turn: showing both would repeat the message for as
     // long as its answer streams.
     if (
-      group.messages[1]?.role === 'status' &&
-      group.messages[1].status === 'confirming' &&
-      result.slice(anchor + 1).some((message) => message.historyTurnId)
+      message.role === 'user' &&
+      message.delivery === 'confirming' &&
+      result.slice(anchor + 1).some((later) => later.historyTurnId)
     )
       continue;
-    result.splice(anchor + 1, 0, ...group.messages);
+    result.splice(anchor + 1, 0, message);
   }
   return result;
 }

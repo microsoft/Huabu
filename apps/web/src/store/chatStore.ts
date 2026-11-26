@@ -13,7 +13,7 @@ import { getDefaultAgentBinding } from './acpProfilesStore';
 import {
   historyMessageIds,
   isProtectedHistoryMessage,
-  keepUndeliveredMessages,
+  keepUnsentMessages,
   trimHistoryPages,
 } from './chatHistoryCache';
 import { preserveLoadedToolDetails } from './chatToolDetails';
@@ -54,7 +54,7 @@ export type DraftQuotedComment = QuotedComment & { draftId: string };
 export interface QueuedAgentTurn {
   id: string;
   prepared: PreparedAgentTurn;
-  status: 'pending' | 'sending' | 'uncertain';
+  status: 'pending' | 'sending';
   /** Queued while a settings save was in flight; read them again at send. */
   settingsPending?: boolean;
 }
@@ -605,7 +605,7 @@ export const useChatStore = create<ChatState>()(
             preservedPrefix.map((message) => message.id),
           );
           return patchThread(state, threadId, {
-            messages: keepUndeliveredMessages(
+            messages: keepUnsentMessages(
               current,
               overlap >= 0
                 ? [...current.slice(0, overlap), ...messages]

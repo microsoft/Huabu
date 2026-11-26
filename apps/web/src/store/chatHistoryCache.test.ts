@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 import {
   historyMessageIds,
-  keepUndeliveredMessages,
+  keepUnsentMessages,
   MAX_HISTORY_PAGES,
   trimHistoryPages,
 } from './chatHistoryCache';
@@ -244,14 +244,13 @@ describe('cursor-backed history cache', () => {
   });
 });
 
-describe('undelivered messages across a history rebuild', () => {
+describe('unsent messages across a history rebuild', () => {
   const turn = (id: string, text: string): ChatMessage[] => [
     { id: `${id}:0`, historyTurnId: id, role: 'user', content: text },
     { id: `${id}:1`, historyTurnId: id, role: 'assistant', segments: [] },
   ];
   const undelivered = (id: string): ChatMessage[] => [
-    { id, role: 'user', content: `Not sent ${id}` },
-    { id: `${id}-status`, role: 'status', status: 'error', localOnly: true },
+    { id, role: 'user', content: `Not sent ${id}`, delivery: 'undelivered' },
   ];
   const ids = (messages: ChatMessage[]) =>
     messages.map((message) => message.id);
@@ -265,13 +264,11 @@ describe('undelivered messages across a history rebuild', () => {
       { id: 'live', role: 'user', content: 'Second' } as ChatMessage,
     ];
     const next = [...turn('t1', 'First'), ...turn('t2', 'Second')];
-    expect(ids(keepUndeliveredMessages(current, next))).toEqual([
+    expect(ids(keepUnsentMessages(current, next))).toEqual([
       't1:0',
       't1:1',
       'a',
-      'a-status',
       'b',
-      'b-status',
       't2:0',
       't2:1',
     ]);
@@ -279,9 +276,9 @@ describe('undelivered messages across a history rebuild', () => {
 
   it('puts one first when the turn before it is no longer loaded, and never twice', () => {
     const current = [...turn('old', 'Earlier'), ...undelivered('a')];
-    const rebuilt = keepUndeliveredMessages(current, turn('new', 'Later'));
-    expect(ids(rebuilt)).toEqual(['a', 'a-status', 'new:0', 'new:1']);
-    expect(keepUndeliveredMessages(rebuilt, rebuilt)).toBe(rebuilt);
+    const rebuilt = keepUnsentMessages(current, turn('new', 'Later'));
+    expect(ids(rebuilt)).toEqual(['a', 'new:0', 'new:1']);
+    expect(keepUnsentMessages(rebuilt, rebuilt)).toBe(rebuilt);
   });
 
   it('leaves a local message with an ordinary error to be replaced by history', () => {
@@ -291,28 +288,21 @@ describe('undelivered messages across a history rebuild', () => {
       { id: 'live-status', role: 'status', status: 'error' },
     ];
     const next = [...turn('t1', 'First'), ...turn('t2', 'Second')];
-    expect(keepUndeliveredMessages(current, next)).toBe(next);
+    expect(keepUnsentMessages(current, next)).toBe(next);
   });
 
   it('lets a newer turn stand in for a send still being confirmed', () => {
     const current: ChatMessage[] = [
       ...turn('t1', 'First'),
-      { id: 'live', role: 'user', content: 'Second' },
-      {
-        id: 'live-status',
-        role: 'status',
-        status: 'confirming',
-        localOnly: true,
-      },
+      { id: 'live', role: 'user', content: 'Second', delivery: 'confirming' },
     ];
     const received = [...turn('t1', 'First'), ...turn('t2', 'Second')];
-    expect(keepUndeliveredMessages(current, received)).toEqual(received);
+    expect(keepUnsentMessages(current, received)).toEqual(received);
     // Nothing newer in history: the send is still only local.
-    expect(ids(keepUndeliveredMessages(current, turn('t1', 'First')))).toEqual([
+    expect(ids(keepUnsentMessages(current, turn('t1', 'First')))).toEqual([
       't1:0',
       't1:1',
       'live',
-      'live-status',
     ]);
   });
 
@@ -330,7 +320,6 @@ describe('undelivered messages across a history rebuild', () => {
       't1:0',
       't1:1',
       'a',
-      'a-status',
       't2:0',
       't2:1',
       'live',
@@ -338,7 +327,7 @@ describe('undelivered messages across a history rebuild', () => {
     // Ahead of everything loaded when nothing precedes it.
     expect(
       historyMessageIds(pages, [...undelivered('a'), ...turn('t2', 'Second')]),
-    ).toEqual(['t1:0', 't1:1', 'a', 'a-status', 't2:0', 't2:1']);
+    ).toEqual(['t1:0', 't1:1', 'a', 't2:0', 't2:1']);
   });
 
   it('survives a merge of the latest history window', () => {
@@ -350,6 +339,6 @@ describe('undelivered messages across a history rebuild', () => {
     ]);
     expect(
       ids(useChatStore.getState().threadsById.kept?.messages ?? []),
-    ).toEqual(['t1:0', 't1:1', 'a', 'a-status', 't2:0', 't2:1']);
+    ).toEqual(['t1:0', 't1:1', 'a', 't2:0', 't2:1']);
   });
 });

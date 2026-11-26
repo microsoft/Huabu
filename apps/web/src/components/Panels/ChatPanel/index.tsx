@@ -836,7 +836,7 @@ export const ChatPanel = ({
   // A send whose delivery is still being confirmed reads as one in flight.
   const confirmingDelivery = useChatStore((state) => {
     const last = state.threadsById[threadId]?.messages.at(-1);
-    return last?.role === 'status' && last.status === 'confirming';
+    return last?.role === 'user' && last.delivery === 'confirming';
   });
   useEffect(
     () =>

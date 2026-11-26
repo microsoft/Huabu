@@ -21,8 +21,7 @@ import { i18n } from '@/i18n';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
 import {
   HISTORY_PAGE_TURNS,
-  isUndeliveredMessage,
-  keepUndeliveredMessages,
+  keepUnsentMessages,
   MAX_HISTORY_PAGES,
 } from '@/store/chatHistoryCache';
 import {
@@ -202,7 +201,7 @@ function applyInitialHistoryPage(response: AgentHistoryPageResponse): void {
   const messages = historyTurnsToMessages(response.turns);
   state.setMessages(
     response.threadId,
-    keepUndeliveredMessages(
+    keepUnsentMessages(
       selectThreadMessages(state, response.threadId),
       messages,
     ),
@@ -867,13 +866,14 @@ export function useChatHistory(
         current.messages.at(-1) === original.at(-1)
       );
     };
-    // An undelivered message is local too, but no turn will ever arrive for it.
+    // A message marked with its delivery is local too, but this refresh is
+    // not waiting for its turn.
     const localUser = original
       .filter(
-        (message, index) =>
+        (message) =>
           message.role === 'user' &&
           !message.historyTurnId &&
-          !isUndeliveredMessage(original, index),
+          !message.delivery,
       )
       .at(-1);
     const lastPersistedTurn = [...original]

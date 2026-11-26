@@ -716,20 +716,15 @@ describe('manual virtual chat', () => {
 
   it('resends the message a failed row belongs to, not the latest one', () => {
     const retry = vi.fn();
-    const undelivered = {
-      id: 'not-sent',
+    const failed = {
+      id: 'failed',
       role: 'user' as const,
-      content: 'Never delivered',
+      content: 'Failed earlier',
     };
     render({
       messages: [
-        undelivered,
-        {
-          id: 'not-sent-status',
-          role: 'status',
-          status: 'error',
-          localOnly: true,
-        },
+        failed,
+        { id: 'failed-status', role: 'status', status: 'error' },
         { id: 'later', role: 'user', content: 'Sent afterwards' },
         {
           id: 'later-answer',
@@ -742,32 +737,44 @@ describe('manual virtual chat', () => {
     act(() =>
       container
         .querySelector<HTMLButtonElement>(
-          '[data-chat-message-id="not-sent-status"] button',
+          '[data-chat-message-id="failed-status"] button',
+        )
+        ?.click(),
+    );
+    expect(retry).toHaveBeenCalledExactlyOnceWith(failed);
+  });
+
+  it('offers a resend under an undelivered message and nothing under one being confirmed', () => {
+    const retry = vi.fn();
+    const undelivered = {
+      id: 'not-sent',
+      role: 'user' as const,
+      content: 'Never delivered',
+      delivery: 'undelivered' as const,
+    };
+    render({
+      messages: [
+        undelivered,
+        {
+          id: 'waiting',
+          role: 'user',
+          content: 'Did this arrive?',
+          delivery: 'confirming',
+        },
+      ],
+      onRetry: retry,
+    });
+    expect(
+      container.querySelector('[data-chat-message-id="waiting"] [data-status]'),
+    ).toBeNull();
+    act(() =>
+      container
+        .querySelector<HTMLButtonElement>(
+          '[data-chat-message-id="not-sent"] [data-status-retry]',
         )
         ?.click(),
     );
     expect(retry).toHaveBeenCalledExactlyOnceWith(undelivered);
-  });
-
-  it('draws no row for a send whose delivery is being confirmed', () => {
-    render({
-      messages: [
-        { id: 'waiting', role: 'user', content: 'Did this arrive?' },
-        {
-          id: 'waiting-status',
-          role: 'status',
-          status: 'confirming',
-          localOnly: true,
-        },
-      ],
-      onRetry: vi.fn(),
-    });
-    expect(
-      container.querySelector('[data-chat-message-id="waiting"]'),
-    ).not.toBeNull();
-    expect(
-      container.querySelector('[data-chat-message-id="waiting-status"]'),
-    ).toBeNull();
   });
 
   it('stops automatic retries on page errors and offers an explicit retry', () => {
