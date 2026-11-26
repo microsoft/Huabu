@@ -50,7 +50,6 @@ import {
   EXISTENCE_UNIT,
   InFlightSet,
   nodeUnitKey,
-  orderKey,
   parseKey,
   type HeldKeys,
   type WithheldUnit,
@@ -188,8 +187,6 @@ export interface PrepareRemoteInput {
 export interface PreparedRemote extends FieldLevelResult {
   /** The update confirms a batch this page sent. */
   own: boolean;
-  /** Whether this page holds an unconfirmed change to a parent's child order. */
-  orderHeld: (parentId: string | null) => boolean;
   /** Record what was withheld and release this page's confirmed holds. */
   finish: () => void;
 }
@@ -591,7 +588,6 @@ export function createBrowserSync(deps: BrowserSyncDeps): BrowserSync {
       return {
         ...result,
         own,
-        orderHeld: (parentId) => inFlight.isHeld(orderKey(parentId), except),
         finish: () => {
           for (const unit of result.withheld) {
             inFlight.withhold(unit);

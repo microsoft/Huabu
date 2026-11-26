@@ -27,7 +27,9 @@ import {
   autoHeightKey,
   intrinsicToLayoutHeight,
   measuredSizeKey,
+  seedNodeOrder,
   type Delta,
+  type NestableNode,
 } from '@huabu/shared/canvas-engine';
 
 import { dismissToast, toast } from '@/components/Common/Toast';
@@ -126,7 +128,6 @@ function deliver(update: PostCanvasExecuteResponse, source: 'ui' | 'agent') {
     update.toVersion,
     update.pendingEffects as Parameters<typeof current.applyServerDeltas>[2],
     false,
-    { events: update.orderEvents },
     {
       ...(update.operationId ? { operationId: update.operationId } : {}),
       source,
@@ -214,7 +215,11 @@ beforeEach(() => {
   resetCanvasSyncForTests();
   setCanvasSyncLineageForTests(SPACE, FAKE_LINEAGE);
   own = [];
-  const nodes = [note(X, 0, 0), note(Y, 0, 300)];
+  // A page loads its Space from the server, which keys every node.
+  const nodes = seedNodeOrder([
+    note(X, 0, 0),
+    note(Y, 0, 300),
+  ] as unknown as NestableNode[]) as unknown as Node[];
   server.reset(nodes, [], 1);
   canvasHistoryManager.activate(SPACE, true);
   state()._setStateRaw({
@@ -1570,13 +1575,14 @@ describe('undo and redo beyond what commands can say', () => {
         type: 'RESTORE_NODES',
         nodes: [expect.objectContaining({ id: X, data: original.data })],
       },
-      // It comes back where it was in the paint order.
-      { type: 'REORDER_NODES', nodeIds: [X], to: { before: Y } },
     ]);
     // A move made before the restore is answered goes out after it.
     moveHere(X, 700);
     await answer(1);
     expect(serverNode(X)?.data).toMatchObject(original.data);
+    // It comes back where it was in the paint order, by the key it carries.
+    expect(state().nodes.map((n) => n.id)).toEqual([X, Y]);
+    expect(server.state.nodes.map((n) => n.id)).toEqual([X, Y]);
     await vi.advanceTimersByTimeAsync(0);
     await answer(2);
     expect(serverNode(X)?.position).toEqual({ x: 700, y: 0 });
@@ -2864,7 +2870,7 @@ describe('a command batch marks no node as being processed on the page', () => {
   const settle = () => vi.advanceTimersByTimeAsync(5_000);
 
   beforeEach(() => {
-    const nodes = [...state().nodes, pdf];
+    const nodes = seedNodeOrder([...state().nodes, pdf]);
     server.reset(nodes, [], 1);
     state()._setStateRaw({ nodes });
   });
@@ -2882,6 +2888,24 @@ describe('a command batch marks no node as being processed on the page', () => {
       'a new source',
       () =>
         state().executeCommands([patch(PDF, { src: 'artifact-other.pdf' })]),
+    ],
+    [
+      'a layer change',
+      () =>
+        state().executeCommands([
+          {
+            type: 'REORDER_NODES',
+            nodeIds: [X as `node-${string}`],
+            to: 'top',
+          },
+        ]),
+    ],
+    [
+      'a place in a Column track',
+      () =>
+        state().executeCommands([
+          patch(PDF, { frameColumn: 1, trackKey: 'a5' }),
+        ]),
     ],
     [
       'a created node',

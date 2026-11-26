@@ -221,7 +221,7 @@ export function commandsForStateDiff(
   commands.push(...nodeDiff.commands);
   uncovered.push(...nodeDiff.uncovered);
 
-  commands.push(...reorderCommands(survivors, next.nodes));
+  // Paint order is in the node diff above: `data.paintKey` is a node unit.
 
   // An edge that comes back is put back as it was, handles included,
   // rather than connected and routed anew.

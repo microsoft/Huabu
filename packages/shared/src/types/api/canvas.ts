@@ -17,7 +17,6 @@ import {
 } from './canvas-sync.js';
 
 import type { videoCoverPatchSchema } from './preprocessing.js';
-import type { SetSiblingOrderEvent } from '../../canvas-engine/siblingOrder.js';
 
 export const nodePropertyValueSchema = z.union([
   z.string(),
@@ -657,12 +656,6 @@ export interface PostCanvasExecuteResponse {
   edits: CanvasExecuteEditOutcome[];
   /** Subset of engine-pending effects that clients should drain. */
   pendingEffects: CanvasExecutePendingEffects;
-  /**
-   * Sibling paint order of every parent the batch changed, to replay after
-   * `deltas`. Absent when no order changed; ignoring it keeps entity-only
-   * replay.
-   */
-  orderEvents?: SetSiblingOrderEvent[];
   /**
    * Stored content revision of every node whose saved content (a sidecar
    * field) this batch created or changed, keyed by node id. The page that

@@ -222,6 +222,13 @@ const createNodes: CommandDefinition<Cmd> = {
         }
       }
 
+      // A paint key ranks a node among the siblings it had. A pasted or
+      // duplicated node is a new node: it is keyed for where it is put.
+      if ('paintKey' in node.data) {
+        const { paintKey: _paintKey, ...data } = node.data;
+        node.data = data;
+      }
+
       if (input.selectOnCreate === false) noSelectOnCreateIds.add(nodeId);
       else if (input.selectOnCreate === true)
         forceSelectOnCreateIds.add(nodeId);

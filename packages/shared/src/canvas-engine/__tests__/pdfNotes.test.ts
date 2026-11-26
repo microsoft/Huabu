@@ -4,25 +4,30 @@
 import { describe, expect, it } from 'vitest';
 
 import { collectCommandIds, commandReadTargets } from '../commandTargets.js';
+import { readPaintKey } from '../container/paintOrder.js';
 import { executeCanvasCommands } from '../executor.js';
 import { includePdfNotes } from '../pdfNotes.js';
+import { seedNodeOrder } from '../seedOrder.js';
 
 import type { CanvasCommand } from '../../types/canvas/command.js';
 import type { CanvasNode } from '../interfaces.js';
 
-const pdf: CanvasNode = {
-  id: 'node-pdf',
-  type: 'pdf',
-  position: { x: 10, y: 20 },
-  data: { noteNodeId: 'node-note' },
-};
-const note: CanvasNode = {
-  id: 'node-note',
-  type: 'note',
-  position: { x: 0, y: 0 },
-  data: { content: 'My notes' },
-  hidden: true,
-};
+// A stored Space is read with its paint keys already in place.
+const [pdf, note] = seedNodeOrder<CanvasNode>([
+  {
+    id: 'node-pdf',
+    type: 'pdf',
+    position: { x: 10, y: 20 },
+    data: { noteNodeId: 'node-note' },
+  },
+  {
+    id: 'node-note',
+    type: 'note',
+    position: { x: 0, y: 0 },
+    data: { content: 'My notes' },
+    hidden: true,
+  },
+]);
 function run(commands: CanvasCommand[], nodes = [pdf, note]) {
   return executeCanvasCommands(
     { source: 'ui', commands },
@@ -357,7 +362,10 @@ describe('PDF-owned real Notes', () => {
         },
       ]);
       expect(undo.writeResult.nodes).toEqual([
-        expect.objectContaining({ id: 'node-pdf', data: {} }),
+        expect.objectContaining({
+          id: 'node-pdf',
+          data: { paintKey: readPaintKey(pdf) },
+        }),
       ]);
       // Without the deletion the Note would be left without an owner.
       const orphan = run([
@@ -382,12 +390,12 @@ describe('PDF-owned real Notes', () => {
       expect(restored.writeResult.nodes).toEqual([
         expect.objectContaining({
           id: 'node-pdf',
-          data: { noteNodeId: 'node-note' },
+          data: { noteNodeId: 'node-note', paintKey: readPaintKey(pdf) },
         }),
         expect.objectContaining({
           id: 'node-note',
           hidden: true,
-          data: { content: 'My notes' },
+          data: { content: 'My notes', paintKey: readPaintKey(note) },
         }),
       ]);
     });

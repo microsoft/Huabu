@@ -47,24 +47,16 @@ export function edgeKey(edgeId: string): string {
   return `e${SEPARATOR}${edgeId}`;
 }
 
-/** Direct-child order of one parent (`null` is the root). */
-export function orderKey(parentId: string | null | undefined): string {
-  return `o${SEPARATOR}${parentId ?? ''}`;
-}
-
 export type ParsedKey =
   | { kind: 'node'; nodeId: string; unit: string }
-  | { kind: 'edge'; edgeId: string }
-  | { kind: 'order'; parentId: string | null };
+  | { kind: 'edge'; edgeId: string };
 
-/** Inverse of {@link nodeUnitKey}, {@link edgeKey} and {@link orderKey}. */
+/** Inverse of {@link nodeUnitKey} and {@link edgeKey}. */
 export function parseKey(key: string): ParsedKey | null {
   const [kind, id, ...rest] = key.split(SEPARATOR);
   if (kind === 'n' && id !== undefined && rest.length > 0)
     return { kind: 'node', nodeId: id, unit: rest.join(SEPARATOR) };
   if (kind === 'e' && id) return { kind: 'edge', edgeId: id };
-  if (kind === 'o' && id !== undefined)
-    return { kind: 'order', parentId: id || null };
   return null;
 }
 
@@ -197,21 +189,10 @@ function edgesEqual(a: UnitEdge, b: UnitEdge): boolean {
   return deepEqual(strip(a), strip(b));
 }
 
-function childOrders(nodes: readonly UnitNode[]): Map<string, string[]> {
-  const byParent = new Map<string, string[]>();
-  for (const node of nodes) {
-    const key = orderKey(node.parentId as string | undefined);
-    const list = byParent.get(key);
-    if (list) list.push(node.id);
-    else byParent.set(key, [node.id]);
-  }
-  return byParent;
-}
-
 /**
  * Keys a local batch holds: every (node, unit) whose value differs between
- * `prev` and `next`, node and edge existence, and each parent whose
- * direct-child order changed.
+ * `prev` and `next`, and node and edge existence. Paint order needs no key
+ * of its own: it is the node unit `data.paintKey`.
  *
  * A node's `position` and `parent` are held together: a position is
  * relative to the parent, so a change to either holds both. An update from
@@ -257,15 +238,6 @@ export function deriveHeldKeys(
     for (const node of prev.nodes) {
       if (!nextIds.has(node.id))
         keys.set(nodeUnitKey(node.id, EXISTENCE_UNIT), null);
-    }
-
-    const before = childOrders(prev.nodes);
-    const after = childOrders(next.nodes);
-    for (const key of new Set([...before.keys(), ...after.keys()])) {
-      const a = before.get(key) ?? [];
-      const b = after.get(key) ?? [];
-      if (a.length !== b.length || a.some((id, index) => id !== b[index]))
-        keys.set(key, null);
     }
   }
 

@@ -23,6 +23,7 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { seedNodeOrder } from '@huabu/shared/canvas-engine';
 import { extractCanvasChanges } from '@huabu/shared/canvas-engine';
 
 import {
@@ -250,11 +251,23 @@ forEachProductProfile((profile: StorageProfile, label: string) => {
       });
       const before = await raw.read();
       const loaded = await m.storage.space(canvasId).read();
-      expect(loaded?.state.nodes).toEqual([
-        { id: NODE_A, type: 'note', position: { x: 113, y: 224 }, data: {} },
-        question,
-        unrelated,
-      ]);
+      // The read also gives every node the order key its array position
+      // stands for; like the filtering, that writes nothing until a save.
+      expect(loaded?.state.nodes).toEqual(
+        seedNodeOrder([
+          { id: NODE_A, type: 'note', position: { x: 113, y: 224 }, data: {} },
+          question,
+          unrelated,
+        ] as never[]),
+      );
+      expect(
+        (loaded?.state.nodes as Array<{ data: { paintKey?: string } }>).map(
+          (node) => typeof node.data.paintKey,
+        ),
+      ).toEqual(['string', 'string', 'string']);
+      expect((await m.storage.space(canvasId).read())?.state.nodes).toEqual(
+        loaded?.state.nodes,
+      );
       expect(loaded?.state.edges).toEqual(edges.slice(1));
       expect(await raw.read()).toEqual(before);
       expect(

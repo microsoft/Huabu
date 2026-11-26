@@ -18,9 +18,11 @@ import {
   applyStructuredFrameRelayout,
   describeFrameLayout,
 } from '../../autoLayout/gridLayout.js';
-import { applyOrderedDeltas } from '../../delta.js';
+import { readTrackKey } from '../../autoLayout/layoutOrder.js';
+import { applyDeltas } from '../../delta.js';
 import { diffCanvasState } from '../../diff.js';
 import { executeCanvasCommands } from '../../executor.js';
+import { seedNodeOrder } from '../../seedOrder.js';
 import { HANDLERS } from '../index.js';
 
 import type { CanvasCommand } from '../../../types/canvas/command.js';
@@ -71,9 +73,31 @@ describe('SET_FRAME_LAYOUT cells', () => {
           { source: 'ui', commands },
           { nodes, edges: [], canvasId: 'layout' },
         ).writeResult;
-      const layout = (nodes: Node[]) =>
-        nodes.find((node) => node.id === 'frame')?.data.layoutOrder;
       const field = mode === 'column' ? 'frameColumn' : 'frameRow';
+      /**
+       * The reading order as the children store it: each child's track and
+       * its key inside that track. A child without a key is not listed.
+       */
+      const layout = (nodes: Node[], frameId = 'frame') => {
+        const tracks = new Map<number, Node[]>();
+        for (const node of nodes) {
+          if (node.parentId !== frameId || readTrackKey(node) === undefined)
+            continue;
+          const track = Number(node.data[field] ?? 0);
+          tracks.set(track, [...(tracks.get(track) ?? []), node]);
+        }
+        return [...tracks.entries()]
+          .sort(([a], [b]) => a - b)
+          .map(([, children]) =>
+            children
+              .sort((a, b) =>
+                (readTrackKey(a) as string) < (readTrackKey(b) as string)
+                  ? -1
+                  : 1,
+              )
+              .map((child) => child.id),
+          );
+      };
       const initial = () => {
         const nodes = scene([{ [field]: 0 }, { [field]: 0 }, { [field]: 1 }]);
         nodes[0].data = { layoutMode: mode, gridCount: 2, sizing: 'manual' };
@@ -88,9 +112,12 @@ describe('SET_FRAME_LAYOUT cells', () => {
         return nodes;
       };
 
-      it('seeds legacy coordinate ties before a layer reorder and survives relayout and replay', () => {
-        const nodes = initial();
-        nodes[2].position = { ...nodes[1].position };
+      it('keeps the reading order of coordinate ties through a layer reorder, relayout and replay', () => {
+        const unkeyed = initial();
+        unkeyed[2].position = { ...unkeyed[1].position };
+        // A stored Space is read with its paint and track keys in place, so
+        // the children that tie on their coordinate already read by key.
+        const nodes = seedNodeOrder(unkeyed);
         const output = execute(nodes, [
           {
             type: 'REORDER_NODES',
@@ -107,9 +134,9 @@ describe('SET_FRAME_LAYOUT cells', () => {
         ]).nodes;
         expect(layout(relaid)).toEqual([['c0', 'c1'], ['c2']]);
         expect(
-          applyOrderedDeltas(
+          applyDeltas(
             { nodes, edges: [] },
-            diffCanvasState({ nodes, edges: [] }, output, { orderVersion: 1 }),
+            diffCanvasState({ nodes, edges: [] }, output),
           ).nodes,
         ).toEqual(output.nodes);
       });
@@ -164,7 +191,8 @@ describe('SET_FRAME_LAYOUT cells', () => {
             mode: 'grid',
           },
         ]);
-        expect(layout(grid.nodes)).toBeUndefined();
+        // Track keys belong to the mode that issued them.
+        expect(layout(grid.nodes)).toEqual([]);
         expect(describeFrameLayout(grid.nodes, 'frame')?.mode).toBe('grid');
       });
 
@@ -191,6 +219,43 @@ describe('SET_FRAME_LAYOUT cells', () => {
         const reordered = execute(output.nodes, [command]);
         expect(layout(reordered.nodes)).toEqual([['c1', 'c2'], ['c0']]);
         expect(run(command, reordered.nodes).applied).toBe(false);
+      });
+
+      it('leaves a child placed where it already stands as it is', () => {
+        const nodes = execute(
+          applyStructuredFrameRelayout(initial(), ['frame']).nodes,
+          [
+            {
+              type: 'SET_FRAME_LAYOUT',
+              frameId: 'frame' as Cmd['frameId'],
+              mode,
+              placements: [{ nodeId: 'c2', track: 0, at: 'end' }],
+            },
+          ],
+        ).nodes;
+        expect(layout(nodes)).toEqual([['c0', 'c1', 'c2']]);
+        // The middle child holds a key between its neighbours that is not
+        // the one a fresh placement there would pick.
+        const first = readTrackKey(nodes.find((n) => n.id === 'c0') as Node);
+        const middle = nodes.find((n) => n.id === 'c1') as Node;
+        middle.data = { ...middle.data, trackKey: `${first}V` };
+        expect(layout(nodes)).toEqual([['c0', 'c1', 'c2']]);
+
+        for (const placement of [
+          { nodeId: 'c1', before: 'c2' },
+          { nodeId: 'c1', after: 'c0' },
+        ] as NonNullable<Cmd['placements']>) {
+          const result = run(
+            {
+              type: 'SET_FRAME_LAYOUT',
+              frameId: 'frame' as Cmd['frameId'],
+              mode,
+              placements: [placement],
+            },
+            nodes,
+          );
+          expect(result.applied).toBe(false);
+        }
       });
 
       it('reconciles both Frames on reparent and removes the last deleted member', () => {
@@ -224,7 +289,10 @@ describe('SET_FRAME_LAYOUT cells', () => {
             nodeIds,
           },
         ]);
-        expect(dataOf(deleted.nodes, 'target').layoutOrder).toEqual([]);
+        expect(dataOf(deleted.nodes, 'target')).not.toHaveProperty(
+          'layoutOrder',
+        );
+        expect(layout(deleted.nodes, 'target')).toEqual([]);
       });
 
       it.each([

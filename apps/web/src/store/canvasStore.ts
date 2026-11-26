@@ -68,7 +68,6 @@ import {
   type Delta,
   type ExecutorOptions,
   type NestableNode,
-  type SetSiblingOrderEvent,
 } from '@huabu/shared/canvas-engine';
 
 import { runWebPostEffects } from '@/handler/canvasCommand/postEffects.web';
@@ -144,6 +143,7 @@ import { normalizeFrameHeaderInsets } from './canvasStore/load/normalizeFrameHea
 import { normalizeNodeHeights } from './canvasStore/load/normalizeNodeHeights';
 import { reconcileQuestionStatus } from './canvasStore/load/reconcileQuestionStatus';
 import { warmupNodeHeights } from './canvasStore/load/warmupNodeHeights';
+import { paintOrderMiddleware } from './canvasStore/paintOrderFunnel';
 import {
   refusedGestureHint,
   showRefusedGestureHint,
@@ -160,7 +160,6 @@ import {
   type RemoteContentOutcome,
 } from './canvasStore/save/nodeContentQueue';
 import { createUnloadFlush } from './canvasStore/save/unloadFlush';
-import { replaySiblingOrder } from './canvasStore/siblingOrderReplay';
 import { createResizePreviewController } from './canvasStore/slices/resizePreview';
 import {
   createBrowserSync,
@@ -1022,16 +1021,6 @@ type RFState = {
     },
     agentNodeProjection?: boolean,
     /**
-     * The batch's sibling paint order, installed after its deltas.
-     * `onDiverged` runs when it could not be installed, the local order is
-     * not the server's, and there is no unsaved local edit to protect; the
-     * entity changes and the version are applied either way.
-     */
-    order?: {
-      events?: readonly SetSiblingOrderEvent[];
-      onDiverged?: () => void;
-    },
-    /**
      * Where the batch came from: the request id its writer supplied (this
      * page recognises its own) and the writer's kind. A person's edit, from
      * this page or another, takes no undo snapshot here.
@@ -1779,23 +1768,21 @@ const browserSync = createBrowserSync({
     return keys.size > 0 ? (key) => keys.has(key) : null;
   },
   applyOwnResponse: (response, operationId) => {
-    useCanvasStore.getState().applyServerDeltas(
-      (response.deltas ?? []) as Delta[],
-      response.toVersion,
-      response.pendingEffects,
-      false,
-      {
-        events: response.orderEvents,
-        onDiverged: () => browserSync.deferReload(response.canvasId),
-      },
-      {
-        operationId,
-        source: 'ui',
-        ...(response.nodeContentRevisions
-          ? { nodeContentRevisions: response.nodeContentRevisions }
-          : {}),
-      },
-    );
+    useCanvasStore
+      .getState()
+      .applyServerDeltas(
+        (response.deltas ?? []) as Delta[],
+        response.toVersion,
+        response.pendingEffects,
+        false,
+        {
+          operationId,
+          source: 'ui',
+          ...(response.nodeContentRevisions
+            ? { nodeContentRevisions: response.nodeContentRevisions }
+            : {}),
+        },
+      );
   },
   applyWithheld: (canvasId, units) => {
     if (useCanvasStore.getState().canvasId !== canvasId) return;
@@ -1822,14 +1809,9 @@ const browserSync = createBrowserSync({
       return next as unknown as Node;
     });
     if (!touched) return;
-    // A parent put back to the server's needs the parent-before-child order
-    // React Flow requires; sibling order follows with the reload a refusal
-    // asks for.
-    state._setStateRaw({
-      nodes: units.some((unit) => unit.unit === PARENT_UNIT)
-        ? (normalizeTreeOrder(nodes as NestableNode[]) as Node[])
-        : nodes,
-    });
+    // A paint key put back to the server's, or a parent, changes where a
+    // node stands; the store orders the array by the keys on the way in.
+    state._setStateRaw({ nodes });
   },
   onRejected: ({ canvasId, outcome }) => {
     if (useCanvasStore.getState().canvasId !== canvasId) return;
@@ -3604,8 +3586,18 @@ function restoreFromHistory(direction: 'undo' | 'redo'): void {
   }
 }
 
+/**
+ * What stands between the store and every write of it. Paint order is the
+ * inner layer, next to the store's own `set`, so every setter the outer
+ * layer builds on it (an action's `set`, `setState`, `_setStateRaw`) stores
+ * `nodes` in paint order.
+ */
+const canvasStoreMiddleware = (
+  config: StateCreator<RFState>,
+): StateCreator<RFState> => paintOrderMiddleware(contentSaveMiddleware(config));
+
 const useCanvasStore = create<RFState>()(
-  contentSaveMiddleware((set, get) => ({
+  canvasStoreMiddleware((set, get) => ({
     nodes: [],
     edges: [],
     canvasId: '',
@@ -4036,10 +4028,8 @@ const useCanvasStore = create<RFState>()(
       toVersion,
       pendingEffects,
       agentNodeProjection = false,
-      order,
       sync,
     ) => {
-      const orderEvents = order?.events ?? [];
       const serverRevisions = sync?.nodeContentRevisions;
 
       // 1. Rows name only what changed; from here on each is about the
@@ -4124,8 +4114,7 @@ const useCanvasStore = create<RFState>()(
       };
       // Nothing to apply locally (empty batch, or every row held). The
       // version still moves, so the next update is contiguous.
-      if (rows.length === 0 && orderEvents.length === 0)
-        return finishWithoutRows();
+      if (rows.length === 0) return finishWithoutRows();
 
       // 4. Apply.
       const prevNodes = get().nodes;
@@ -4143,13 +4132,11 @@ const useCanvasStore = create<RFState>()(
           .refreshSpaceTitles(insertedSpaceTargets);
       // A person's edit is theirs to undo, not this page's.
       const recordUndo = !remote.own && sync?.source !== 'ui';
-      let undoSnapshotTaken = false;
       if (agentNodeProjection) {
         canvasHistoryManager.rebaseAgentInitialContent(rows);
       } else if (recordUndo && rows.some(changesEditableState(prevNodes))) {
         canvasHistoryManager.takeSnapshot(prevNodes, prevEdges);
         canvasHistoryManager.noteChange(remote.covered);
-        undoSnapshotTaken = true;
       }
       // Another person's edit is not in this page's history, so no earlier
       // entry may put the whole Space back to how it was before it.
@@ -4163,38 +4150,11 @@ const useCanvasStore = create<RFState>()(
         { nodes: prevNodes as NestableNode[], edges: prevEdges },
         rows,
       );
-      // `applyDeltas` replays through an insertion-ordered `Map`, so a
-      // reparent or a frame created in the same batch can leave a child
-      // ahead of its parent — React Flow then throws "Parent node not
+      // `applyDeltas` returns the nodes in paint order by their keys. A
+      // reparent or a frame created in the same batch can still leave a
+      // child ahead of its parent — React Flow then throws "Parent node not
       // found". Re-establish parent-before-child here.
-      const entityOrderedNodes = normalizeTreeOrder(
-        applied.nodes as NestableNode[],
-      );
-
-      // 5. Sibling paint order, which entity deltas cannot express. A
-      //    failed replay keeps the entity-only result.
-      const orderReplay =
-        orderEvents.length > 0
-          ? replaySiblingOrder(
-              prevNodes as NestableNode[],
-              entityOrderedNodes,
-              // Includes the optimistic copy of a node this page created.
-              remote.insertedNodeIds,
-              orderEvents,
-            )
-          : { nodes: entityOrderedNodes, diverged: false };
-      const orderedNodes = orderReplay.nodes;
-      if (
-        recordUndo &&
-        !agentNodeProjection &&
-        !undoSnapshotTaken &&
-        orderedNodes.some(
-          (node, index) => node.id !== entityOrderedNodes[index]?.id,
-        )
-      ) {
-        // An order-only change is undoable like any other applied batch.
-        canvasHistoryManager.takeSnapshot(prevNodes, prevEdges);
-      }
+      const orderedNodes = normalizeTreeOrder(applied.nodes as NestableNode[]);
 
       get()._setStateRaw({
         nodes: orderedNodes as Node[],
@@ -4258,22 +4218,6 @@ const useCanvasStore = create<RFState>()(
       // Buffer what was kept back, release what this batch confirmed and
       // install what it left to the server's earlier value.
       remote.finish();
-
-      // Values kept back and unsaved edits make the local order differ on
-      // purpose; the next save settles it. So does an unconfirmed local
-      // change to the same parent's children: the update for that change
-      // carries the order the server ended with.
-      if (
-        orderReplay.diverged &&
-        skipped.size === 0 &&
-        !hasUnsavedContent() &&
-        !orderEvents.some((event) => remote.orderHeld(event.parentId)) &&
-        // A parent change kept back leaves the node among its local
-        // siblings; the answer to the change that holds it settles both.
-        !remote.withheld.some((unit) => unit.unit === PARENT_UNIT)
-      ) {
-        order?.onDiverged?.();
-      }
 
       return skippedNodeIds;
     },

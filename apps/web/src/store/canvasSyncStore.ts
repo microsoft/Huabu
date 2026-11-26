@@ -458,9 +458,6 @@ export const useCanvasSyncStore = create<CanvasSyncState>((set, get) => ({
           toVersion,
           pendingEffects as SyncPendingEffects,
           event.data.agentNodeProjection,
-          // Paint order the deltas cannot express; an order that cannot be
-          // installed heals through the same reload as a version gap.
-          { events: event.data.orderEvents, onDiverged: reload },
           // Lets the store recognise the echo of this page's own batch and
           // tell a person's edit from an agent's.
           {

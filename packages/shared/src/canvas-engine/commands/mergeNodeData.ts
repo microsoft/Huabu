@@ -121,6 +121,8 @@ const mergeNodeData: CommandDefinition<Cmd> = {
     // the per-type profile.
     const mutatedNodes: Node[] = [];
     const contentEditedNodeIds: string[] = [];
+    const placedTrackKeyIds: string[] = [];
+    const placedPaintKeyIds: string[] = [];
     let anyApplied = false;
 
     const nextNodes = state.nodes.map((n) => {
@@ -155,6 +157,11 @@ const mergeNodeData: CommandDefinition<Cmd> = {
       };
       if (n.type === 'question' && patchRec.agentLaunchOverrides === null)
         delete mergedData.agentLaunchOverrides;
+      // A patch that names a track key places the node, whatever the key.
+      if ('trackKey' in patchRec && patchRec.trackKey !== undefined)
+        placedTrackKeyIds.push(n.id);
+      if ('paintKey' in patchRec && patchRec.paintKey !== undefined)
+        placedPaintKeyIds.push(n.id);
       // JSON transports cannot carry `undefined`, so `null` clears the cover.
       if (patchRec.coverUrl === null) delete mergedData.coverUrl;
       if (patchRec.properties !== undefined) {
@@ -226,6 +233,8 @@ const mergeNodeData: CommandDefinition<Cmd> = {
       edges: state.edges,
       mutatedNodes,
       ...(contentEditedNodeIds.length > 0 ? { contentEditedNodeIds } : {}),
+      ...(placedTrackKeyIds.length > 0 ? { placedTrackKeyIds } : {}),
+      ...(placedPaintKeyIds.length > 0 ? { placedPaintKeyIds } : {}),
     };
   },
 };

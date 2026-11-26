@@ -11,6 +11,7 @@ import { QUESTION_NODE_DEFAULT_FONT_SIZE } from '@/utils/node/nodeFontConfig';
 
 import { canvasHistoryManager } from './canvasHistoryManager';
 import useCanvasStore from './canvasStore';
+import { seedStoredNodes } from './canvasStore/sync/testing/fakeExecuteServer';
 
 import type { Node } from '@xyflow/react';
 
@@ -70,7 +71,8 @@ beforeEach(() => {
   state()._setStateRaw({
     executeCommands,
     canvasId: 'question-scale-test',
-    nodes: [question()],
+    // As loaded from the server: every node has its paint key.
+    nodes: seedStoredNodes([question()]),
     edges: [],
     version: 1,
     isLoading: true,
@@ -137,18 +139,24 @@ describe('Question card scale through the real store and history', () => {
   );
 
   it('uses live current font/width but an absolute target; preserves parent and local position', async () => {
-    const child = question({
+    const unkeyedChild = question({
       parentId: 'node-frame',
       measured: { width: 407.123456789, height: 110 },
     });
-    child.data.style = { ...(child.data.style as object), fontSize: base * 2 };
-    const frame: Node = {
-      id: 'node-frame',
-      type: 'frame',
-      position: { x: 100, y: 200 },
-      style: { width: 2000, height: 2000 },
-      data: { layoutMode: 'free', sizing: 'manual' },
+    unkeyedChild.data.style = {
+      ...(unkeyedChild.data.style as object),
+      fontSize: base * 2,
     };
+    const [frame, child] = seedStoredNodes<Node>([
+      {
+        id: 'node-frame',
+        type: 'frame',
+        position: { x: 100, y: 200 },
+        style: { width: 2000, height: 2000 },
+        data: { layoutMode: 'free', sizing: 'manual' },
+      },
+      unkeyedChild,
+    ]);
     state()._setStateRaw({ nodes: [frame, child] });
     expect(commit(100)).toBe(true);
     expect(current().data.style).toEqual({
@@ -169,9 +177,11 @@ describe('Question card scale through the real store and history', () => {
   });
 
   it('clears a legacy pinned height while retaining all other style fields', async () => {
-    const node = question({
-      style: { width: 321.125, height: 250, opacity: 0.75 },
-    });
+    const [node] = seedStoredNodes([
+      question({
+        style: { width: 321.125, height: 250, opacity: 0.75 },
+      }),
+    ]);
     state()._setStateRaw({ nodes: [node] });
     commit(200);
     expect(current().style).toEqual({ width: 642.25, opacity: 0.75 });
@@ -239,7 +249,7 @@ describe('Question card scale through the real store and history', () => {
     'rejects a live %s target without history',
     (type) => {
       state()._setStateRaw({
-        nodes: type === 'missing' ? [] : [question({ type })],
+        nodes: type === 'missing' ? [] : seedStoredNodes([question({ type })]),
       });
       const before = state().nodes;
       expect(commit(200)).toBe(false);

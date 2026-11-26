@@ -3,10 +3,7 @@
 
 import { agentInputSchema } from '@agenetes/protocol';
 
-import {
-  fingerprintNodeFields,
-  isSetSiblingOrderEvent,
-} from '@huabu/shared/canvas-engine';
+import { fingerprintNodeFields } from '@huabu/shared/canvas-engine';
 
 import {
   escapeXmlAttr,
@@ -187,19 +184,6 @@ export function rewriteImportContract(
     return fields(
       value,
       { nodeId: 'nodeId', before: 'nodeId', after: 'nodeId' },
-      rewrite,
-    );
-  }
-  if (
-    (context === 'deltas' || context === 'revertDeltas') &&
-    value.type === 'SET_SIBLING_ORDER'
-  ) {
-    if (!isSetSiblingOrderEvent(value)) {
-      throw new Error('Invalid imported sibling-order event');
-    }
-    return fields(
-      value,
-      { parentId: 'nodeId', before: 'nodeIds', after: 'nodeIds' },
       rewrite,
     );
   }

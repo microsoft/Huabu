@@ -17,14 +17,6 @@ import { mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { prepareWorkspaceOnDisk } from './workspace-prepare.js';
-import {
-  beginWorkspaceActivation,
-  isManagedMode,
-  resolveWorkspacePath,
-  WorkspaceActivationInProgressError,
-} from './workspace.js';
-import { getDataDir } from '../data-dir.js';
 import {
   adoptWorkspaceDirectory,
   createNamedWorkspace,
@@ -32,6 +24,15 @@ import {
   materializesWorkspaces,
   type WorkspaceHandle,
 } from './storage/index.js';
+import { prepareWorkspaceOnDisk } from './workspace-prepare.js';
+import {
+  beginWorkspaceActivation,
+  isActiveWorkspacePath,
+  isManagedMode,
+  resolveWorkspacePath,
+  WorkspaceActivationInProgressError,
+} from './workspace.js';
+import { getDataDir } from '../data-dir.js';
 import { getLogger } from '../utils/logger.js';
 
 const DEFAULT_ACTIVATION_TIMEOUT_MS = 70_000;
@@ -72,6 +73,8 @@ export { WorkspaceActivationInProgressError };
 interface PreparationOptions {
   timeoutMs?: number;
   workerPath?: string;
+  /** The Server already has this folder open (`prepareWorkspaceOnDisk`). */
+  inUse?: boolean;
 }
 
 let activationInProgress = false;
@@ -113,20 +116,24 @@ export function runWorkspacePreparation(
     try {
       // Pipe stderr so an import-time crash in the worker (before its own
       // try/catch runs) is captured for diagnosis instead of vanishing.
-      child = fork(workerPath, [workspacePath], {
-        stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
-        // Source-mode callers (tests included) may run without tsx themselves.
-        // The worker still needs its loader to resolve .js imports to .ts.
-        ...(workerPath.endsWith('.ts')
-          ? {
-              execArgv: [
-                ...process.execArgv,
-                '--import',
-                import.meta.resolve('tsx'),
-              ],
-            }
-          : {}),
-      });
+      child = fork(
+        workerPath,
+        options.inUse ? [workspacePath, 'in-use'] : [workspacePath],
+        {
+          stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
+          // Source-mode callers (tests included) may run without tsx themselves.
+          // The worker still needs its loader to resolve .js imports to .ts.
+          ...(workerPath.endsWith('.ts')
+            ? {
+                execArgv: [
+                  ...process.execArgv,
+                  '--import',
+                  import.meta.resolve('tsx'),
+                ],
+              }
+            : {}),
+        },
+      );
     } catch (error) {
       reject(error);
       return;
@@ -211,7 +218,12 @@ export async function prepareWorkspacePath(
   const resolvedPath = resolveWorkspacePath(newPath);
   activationInProgress = true;
   try {
-    await runWorkspacePreparation(resolvedPath, options);
+    // Activating the folder that is already active prepares it while its
+    // Spaces can be saved.
+    await runWorkspacePreparation(resolvedPath, {
+      ...options,
+      inUse: isActiveWorkspacePath(resolvedPath),
+    });
     return resolvedPath;
   } finally {
     activationInProgress = false;

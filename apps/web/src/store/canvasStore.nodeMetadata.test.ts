@@ -20,6 +20,7 @@ import useCanvasStore, {
 } from './canvasStore';
 import {
   createFakeSpaceServer,
+  seedStoredNodes,
   FAKE_LINEAGE,
 } from './canvasStore/sync/testing/fakeExecuteServer';
 import { openPdfNotes } from './previewWorkspace/actions';
@@ -208,7 +209,6 @@ describe('durable node metadata actions', () => {
       other.toVersion,
       other.pendingEffects as Parameters<typeof state.applyServerDeltas>[2],
       false,
-      { events: other.orderEvents },
       {
         operationId: other.operationId,
         source: 'ui',
@@ -252,7 +252,8 @@ describe('durable node metadata actions', () => {
 
   function seed(id: string) {
     canvasHistoryManager.activate(id, true);
-    const nodes: Node[] = [
+    // As loaded from the server: every node has its paint key.
+    const nodes: Node[] = seedStoredNodes([
       {
         id,
         type: 'pdf',
@@ -263,7 +264,7 @@ describe('durable node metadata actions', () => {
           properties: { keep: 'yes' },
         },
       },
-    ];
+    ]);
     server.reset(structuredClone(nodes), [], 1);
     setCanvasSyncLineageForTests(id, FAKE_LINEAGE);
     useCanvasStore.getState()._setStateRaw({

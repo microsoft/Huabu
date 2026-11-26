@@ -5,8 +5,10 @@ import { assert, describe, expect, it, vi } from 'vitest';
 
 import {
   autoHeightKey,
-  applyOrderedDeltas,
+  applyDeltas,
   assignNodeZIndices,
+  describeFrameLayout,
+  seedNodeOrder,
   diffCanvasState,
   executeCanvasCommands,
   solveStructuredFrameLayout,
@@ -757,8 +759,10 @@ describe('resolvePasteClipboard', () => {
     source[1].data.frameColumn = 0;
     source[3].data.frameColumn = 0;
     const originalOrder = [...assignNodeZIndices(source).keys()];
+    // The page copies nodes as it holds them: each child with its own keys.
+    const copied = seedNodeOrder(source);
     const resolution = resolvePasteClipboard(
-      { type: 'PASTE_CLIPBOARD', clipboardNodes: source, clipboardEdges: [] },
+      { type: 'PASTE_CLIPBOARD', clipboardNodes: copied, clipboardEdges: [] },
       ui,
     );
     const output = executeCanvasCommands(
@@ -767,16 +771,19 @@ describe('resolvePasteClipboard', () => {
     ).writeResult;
     expect(output.nodes.every((n) => !originalOrder.includes(n.id))).toBe(true);
     const labels = new Map(output.nodes.map((n) => [n.id, n.data.label]));
-    const order = output.nodes.find((n) => n.data.label === 'outer')?.data
-      .layoutOrder as string[][];
+    const outer = output.nodes.find((n) => n.data.label === 'outer');
+    expect(outer?.data).not.toHaveProperty('layoutOrder');
+    const described = describeFrameLayout(output.nodes, outer?.id ?? '');
+    const order = described && 'tracks' in described ? described.tracks : [];
     expect(order.map((track) => track.map((id) => labels.get(id)))).toEqual([
       ['sibling', 'nested'],
     ]);
     expect(
       [...assignNodeZIndices(output.nodes).keys()].map((id) => labels.get(id)),
     ).toEqual(originalOrder);
-    const deltas = diffCanvasState(ui, output, { orderVersion: 1 });
-    const replayed = applyOrderedDeltas(ui, JSON.parse(JSON.stringify(deltas)));
+    // Paint order travels in the node rows, as each node's key.
+    const deltas = diffCanvasState(ui, output);
+    const replayed = applyDeltas(ui, JSON.parse(JSON.stringify(deltas)));
     expect(replayed.nodes).toEqual(output.nodes);
     expect(replayed.edges).toEqual(output.edges);
   });

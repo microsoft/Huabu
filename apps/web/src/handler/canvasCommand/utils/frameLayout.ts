@@ -9,7 +9,7 @@
  *
  * `AUTO_LAYOUT` no longer exists as a command (see CHANGELOG
  * 2026-05-24); we emit `SET_NODE_GEOMETRY` (positions + frame size)
- * and `MERGE_NODE_DATA` (cells and reading lists) so structured re-flows
+ * and `MERGE_NODE_DATA` (cells and track keys) so structured re-flows
  * share the same undo step as the gesture that triggered them.
  */
 
@@ -17,9 +17,11 @@ import {
   applyColumnLayout,
   applyGridLayout,
   applyRowLayout,
+  settleTrackKeys,
   readFrameGridConfig,
   readFrameGridRow,
   readFrameTrack,
+  trackKeyChanges,
 } from '@huabu/shared/canvas-engine';
 
 import type {
@@ -81,14 +83,11 @@ export function applyPendingMutations(
     for (const p of frameDataPatches) frameDataById.set(p.nodeId, p.patch);
   }
 
-  return nodes.map((n) => {
+  const patched = nodes.map((n) => {
     let next = n;
     const cellPatch = cellById.get(n.id);
     if (cellPatch) {
-      next = {
-        ...next,
-        data: { ...(next.data ?? {}), ...cellPatch },
-      };
+      next = { ...next, data: { ...(next.data ?? {}), ...cellPatch } };
     }
     const framePatch = frameDataById.get(n.id);
     if (framePatch) {
@@ -99,6 +98,10 @@ export function applyPendingMutations(
     }
     return next;
   });
+  // As the engine will after the commands these patches become: a child
+  // sent to another track leaves its place in the old one, so the layout
+  // pass reads it by coordinate.
+  return settleTrackKeys(patched, nodes);
 }
 
 /**
@@ -150,11 +153,19 @@ export function buildStructuredFrameRelayoutCommands(
           ? applyRowLayout(workingNodes, id, cfg.count)
           : applyGridLayout(workingNodes, id, cfg.count);
     if (!result) continue;
+    // Reading order is each child's own track key: only a child that has
+    // none for the place the solver read it in gets one.
     if (result.layoutOrder) {
-      dataPatches.push({
-        nodeId: id as CanvasNodeId,
-        patch: { layoutOrder: result.layoutOrder },
-      });
+      const keys = trackKeyChanges(
+        result.layoutOrder,
+        new Map(workingNodes.map((node) => [node.id, node])),
+      );
+      for (const [nodeId, trackKey] of keys) {
+        dataPatches.push({
+          nodeId: nodeId as CanvasNodeId,
+          patch: { trackKey },
+        });
+      }
     }
 
     // Child positions (only when they actually move).

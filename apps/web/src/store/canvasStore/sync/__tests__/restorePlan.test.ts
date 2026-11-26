@@ -6,6 +6,8 @@ import { describe, expect, it } from 'vitest';
 import {
   applySharedPostEffectsFromWriteResult,
   executeCanvasCommands,
+  seedNodeOrder,
+  type NestableNode,
 } from '@huabu/shared/canvas-engine';
 
 import { deriveHeldKeys } from '../inFlight';
@@ -17,6 +19,10 @@ import type { Edge, Node } from '@xyflow/react';
 const CONTENT_KEYS = new Set(['content', 'label']);
 const isContent = (unit: string): boolean =>
   unit.startsWith('data.') && CONTENT_KEYS.has(unit.slice(5));
+
+/** Nodes as a page holds them: loaded from the server, so each has a key. */
+const seeded = <T extends { id: string }>(nodes: T[]): T[] =>
+  seedNodeOrder(nodes as unknown as NestableNode[]) as unknown as T[];
 
 function plan(before: PlanState, target: PlanState) {
   const run = (commands: CanvasCommand[]): PlanState => {
@@ -64,17 +70,20 @@ describe('planRestore', () => {
   });
 
   it('brings a deleted node and its edge back, in its old place in the order', () => {
-    const a = note('a');
-    const b = note('b', { position: { x: 300, y: 0 } });
+    const [a, b] = seeded([
+      note('a'),
+      note('b', { position: { x: 300, y: 0 } }),
+    ]);
     const edge = { id: 'e', source: 'a', target: 'b', sourceHandle: 'right' };
     const result = plan(
       { nodes: [b], edges: [] },
       { nodes: [a, b], edges: [edge] },
     );
+    // The node carries its own paint key, so it comes back in its place
+    // with no order command.
     expect(result.commands).toEqual([
       { type: 'RESTORE_NODES', nodes: [a] },
       { type: 'RESTORE_NODES', nodes: [], edges: [edge] },
-      { type: 'REORDER_NODES', nodeIds: ['a'], to: { before: 'b' } },
     ]);
     expect(result.restoredNodeIds).toEqual(['a']);
     expect(result.exact).toBe(true);
@@ -82,13 +91,15 @@ describe('planRestore', () => {
   });
 
   it('uses per-property commands for what they can say', () => {
-    const before = note('a', {
+    const [target] = seeded([note('a')]);
+    const before = {
+      ...target,
       position: { x: 50, y: 60 },
-      data: { ...note('a').data, pinned: true },
-    });
+      data: { ...target.data, pinned: true },
+    };
     const result = plan(
       { nodes: [before], edges: [] },
-      { nodes: [note('a')], edges: [] },
+      { nodes: [target], edges: [] },
     );
     expect(result.commands).toEqual([
       {
@@ -105,13 +116,17 @@ describe('planRestore', () => {
 
   it('replaces a node whole when no property command reaches the snapshot, keeping its content', () => {
     // A top-level field no command sets.
-    const target = note('a', { className: 'legacy' });
+    const [target] = seeded([
+      note('a', { className: 'legacy' }) as ReturnType<typeof note> & {
+        className: string;
+        data: { paintKey?: string };
+      },
+    ]);
+    const { className: _className, ...current } = target;
     const result = plan(
       {
         nodes: [
-          note('a', {
-            data: { ...note('a').data, content: 'typed since' },
-          }),
+          { ...current, data: { ...current.data, content: 'typed since' } },
         ],
         edges: [],
       },
@@ -124,7 +139,11 @@ describe('planRestore', () => {
           expect.objectContaining({
             id: 'a',
             className: 'legacy',
-            data: { type: 'note', heightMode: 'fixed' },
+            data: {
+              type: 'note',
+              heightMode: 'fixed',
+              paintKey: target.data.paintKey,
+            },
           }),
         ],
         replace: ['a'],

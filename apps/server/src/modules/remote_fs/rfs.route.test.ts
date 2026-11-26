@@ -1353,9 +1353,28 @@ describe('POST /api/rfs/:canvasId/execute', () => {
       ]);
       expect(painted.json().results[0].applied).toBe(true);
       resetStorageCache();
+      // The order is stored on the children, not as a list on the Frame,
+      // and a layer move does not change it.
       const record = getCanvasStore('layout-placement').read();
-      expect(record?.state.nodes[0]).toMatchObject({
-        data: { layoutOrder: [['node-c', 'node-a', 'node-b']] },
+      const stored = record?.state.nodes as Array<{
+        id: string;
+        data: Record<string, unknown>;
+      }>;
+      expect(
+        stored.find((node) => node.id === 'node-frame')?.data,
+      ).not.toHaveProperty('layoutOrder');
+      const trackKey = (id: string) =>
+        stored.find((node) => node.id === id)?.data.trackKey as string;
+      expect(trackKey('node-c') < trackKey('node-a')).toBe(true);
+      expect(trackKey('node-a') < trackKey('node-b')).toBe(true);
+      const reread = await app.inject({
+        method: 'POST',
+        url: '/rfs/layout-placement/query',
+        payload: { type: 'INSPECT_NODES', ids: ['node-frame'] },
+      });
+      expect(reread.json().result.nodes[0].layout).toEqual({
+        mode: 'column',
+        tracks: [['node-c', 'node-a', 'node-b']],
       });
     } finally {
       await app.close();

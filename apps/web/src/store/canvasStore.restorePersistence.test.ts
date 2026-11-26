@@ -34,7 +34,10 @@ import useCanvasStore, {
 } from './canvasStore';
 import { ApiError } from '../api/_client';
 import { CanvasConflictError } from '../api/canvas';
-import { createFakeExecuteServer } from './canvasStore/sync/testing/fakeExecuteServer';
+import {
+  createFakeExecuteServer,
+  seedStoredNodes,
+} from './canvasStore/sync/testing/fakeExecuteServer';
 import {
   openPreviewNode,
   openSpaceConversation,
@@ -60,7 +63,7 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-const note: Node = {
+const storedNote: Node = {
   id: 'node-restore-note',
   type: 'note',
   position: { x: 0, y: 0 },
@@ -72,6 +75,8 @@ const note: Node = {
     heightMode: 'fixed',
   },
 };
+// As loaded from the server: the node has its paint key.
+const [note] = seedStoredNodes([storedNote]);
 let version: number;
 let topology: Node[];
 let body: string | undefined;
@@ -445,11 +450,13 @@ describe('undo/redo persistence ordering', () => {
   });
 
   it('restores a deleted PDF, whose body never reaches the web, without calling it missing', async () => {
-    const pdf = {
-      ...note,
-      type: 'pdf',
-      data: { label: 'Paper', src: 'artifacts/paper.pdf' },
-    };
+    const [pdf] = seedStoredNodes([
+      {
+        ...storedNote,
+        type: 'pdf',
+        data: { label: 'Paper', src: 'artifacts/paper.pdf' },
+      },
+    ]);
     topology = [pdf];
     state()._setStateRaw({ nodes: [pdf] });
     await deleted();
@@ -511,15 +518,22 @@ describe('undo/redo persistence ordering', () => {
   });
 
   it('persists grouped root exits through undo and redo as parent commands', async () => {
-    const frame: Node = {
-      id: 'node-source-frame',
-      type: 'frame',
-      position: { x: 500, y: 600 },
-      style: { width: 1200, height: 800 },
-      data: { label: 'Source', sizing: 'manual', layoutMode: 'free' },
+    const storedChild = {
+      ...storedNote,
+      parentId: 'node-source-frame',
+      selected: true,
     };
-    const child = { ...note, parentId: frame.id, selected: true };
-    const other = { ...child, id: 'node-other', position: { x: 400, y: 0 } };
+    const [frame, child, other] = seedStoredNodes<Node>([
+      {
+        id: 'node-source-frame',
+        type: 'frame',
+        position: { x: 500, y: 600 },
+        style: { width: 1200, height: 800 },
+        data: { label: 'Source', sizing: 'manual', layoutMode: 'free' },
+      },
+      storedChild,
+      { ...storedChild, id: 'node-other', position: { x: 400, y: 0 } },
+    ]);
     state()._setStateRaw({ nodes: [frame, child, other] });
     topology = [frame, child, other];
     const parents = () =>

@@ -24,10 +24,7 @@ import { afterEach, beforeEach, expect, it } from 'vitest';
 import { z } from 'zod';
 
 import { validateInteractiveViewState } from '@huabu/shared';
-import {
-  applySiblingOrderEvents,
-  assignNodeZIndices,
-} from '@huabu/shared/canvas-engine';
+import { assignNodeZIndices } from '@huabu/shared/canvas-engine';
 
 import { remapImportedSpace } from './import-space-identity.js';
 import { parseFrontmatter } from '../../utils/markdown-frontmatter.js';
@@ -39,10 +36,7 @@ import type { CanvasFile } from './persistence-types.js';
 import type { PersistedTurn } from '@agenetes/agenetes';
 import type { ChatHistoryItem } from '@huabu/shared';
 import type { InteractiveViewDefinitionV1 } from '@huabu/shared';
-import type {
-  CanvasNode,
-  SetSiblingOrderEvent,
-} from '@huabu/shared/canvas-engine';
+import type { CanvasNode } from '@huabu/shared/canvas-engine';
 
 let directory: string;
 beforeEach(async () => {
@@ -86,85 +80,49 @@ function record(): CanvasFile {
   };
 }
 
-it('remaps complete historical sibling lists and preserves imported forest order', async () => {
+it('remaps the Frame reading order and preserves imported forest order', async () => {
   const original = record();
   const nodes = original.state.nodes as CanvasNode[];
   nodes[0].data.layoutOrder = [['note']];
-  const before = [nodes[2], nodes[0], nodes[1]];
-  const event: SetSiblingOrderEvent = {
-    type: 'SET_SIBLING_ORDER',
-    parentId: null,
-    before: ['agent', 'frame'],
-    after: ['frame', 'agent'],
-    orderVersion: 2,
-  };
-  const nested: SetSiblingOrderEvent = {
-    type: 'SET_SIBLING_ORDER',
-    parentId: 'frame',
-    before: ['note'],
-    after: ['note'],
-    orderVersion: 2,
-  };
-  await mkdir(path.join(directory, '.history'));
-  const log = path.join(directory, '.history', 'delta-log.jsonl');
-  await writeFile(
-    log,
-    JSON.stringify({
-      deltas: [event, nested],
-      revertDeltas: [{ ...event, before: event.after, after: event.before }],
-    }),
-  );
   const imported = await remapImportedSpace(directory, original, 'target');
   const [frame, note, agent] = imported.state.nodes as CanvasNode[];
   expect(frame.data.layoutOrder).toEqual([[note.id]]);
-  const mapped = JSON.parse(await readFile(log, 'utf8')) as {
-    deltas: SetSiblingOrderEvent[];
-    revertDeltas: SetSiblingOrderEvent[];
-  };
-  expect(mapped.deltas).toEqual([
-    { ...event, before: [agent.id, frame.id], after: [frame.id, agent.id] },
-    { ...nested, parentId: frame.id, before: [note.id], after: [note.id] },
-  ]);
-  expect(mapped.revertDeltas[0]).toEqual({
-    ...event,
-    before: [frame.id, agent.id],
-    after: [agent.id, frame.id],
-  });
-  const importedBefore = before.map((n) =>
-    n.id === 'agent' ? agent : n.id === 'frame' ? frame : note,
-  );
-  const replayed = applySiblingOrderEvents(
-    importedBefore,
-    importedBefore,
-    mapped.deltas,
-  );
-  expect([...assignNodeZIndices(replayed).keys()]).toEqual([
-    frame.id,
-    note.id,
-    agent.id,
-  ]);
-  expect(replayed).toEqual(imported.state.nodes);
+  expect(note.parentId).toBe(frame.id);
+  expect([
+    ...assignNodeZIndices(imported.state.nodes as CanvasNode[]).keys(),
+  ]).toEqual([frame.id, note.id, agent.id]);
 });
 
-it('rejects malformed sibling-order history instead of importing ambiguous lists', async () => {
-  await mkdir(path.join(directory, '.history'));
-  await writeFile(
-    path.join(directory, '.history', 'delta-log.jsonl'),
-    JSON.stringify({
-      deltas: [
-        {
-          type: 'SET_SIBLING_ORDER',
-          parentId: null,
-          before: ['frame', 'agent'],
-          after: ['frame', 'frame'],
-          orderVersion: 2,
-        },
-      ],
-    }),
-  );
-  await expect(
-    remapImportedSpace(directory, record(), 'target'),
-  ).rejects.toThrow('Invalid imported sibling-order event');
+it('keeps the order of siblings that share an order key, which their ids decided', async () => {
+  const original = record();
+  original.state.nodes = [
+    {
+      id: 'frame',
+      type: 'frame',
+      position: { x: 0, y: 0 },
+      data: { label: 'Frame', layoutMode: 'column', paintKey: 'a0' },
+    },
+    ...['first', 'second', 'third'].map((id) => ({
+      id,
+      type: 'note',
+      parentId: 'frame',
+      position: { x: 0, y: 0 },
+      data: { label: id, paintKey: 'a0', trackKey: 'a0', frameColumn: 0 },
+    })),
+  ];
+  original.state.edges = [];
+  const imported = await remapImportedSpace(directory, original, 'target');
+  const children = (imported.state.nodes as CanvasNode[]).slice(1);
+  expect(children.map((node) => node.data.label)).toEqual([
+    'first',
+    'second',
+    'third',
+  ]);
+  for (const field of ['paintKey', 'trackKey']) {
+    const keys = children.map((node) => String(node.data[field]));
+    expect(keys[0]).toBe('a0');
+    expect([...new Set(keys)].sort()).toEqual(keys);
+  }
 });
 
 it('preserves owned notes and property values when importing with new identities', async () => {

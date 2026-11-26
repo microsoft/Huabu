@@ -296,6 +296,36 @@ describe.each([['disk'], ['sqlite']] as const)(
       expect(updates()).toHaveLength(2);
     });
 
+    it('announces a node a delta replay inserts with the order key it is stored with', async () => {
+      const out = await applyDeltasOnServer({
+        canvasId: CANVAS,
+        deltas: [
+          {
+            type: 'INSERT_NODE',
+            node: {
+              id: 'node-inserted',
+              type: 'text',
+              position: { x: 900, y: 900 },
+              data: { content: 'Inserted without a key' },
+            },
+          } as unknown as Delta,
+        ],
+        originator: { source: 'ui' },
+      });
+      const stored = (
+        (await space(CANVAS).read())?.state.nodes as
+          | { id: string; data: { paintKey?: string } }[]
+          | undefined
+      )?.find((node) => node.id === 'node-inserted');
+      expect(stored?.data.paintKey).toEqual(expect.any(String));
+      // Pages are told the key that was stored, not left without one.
+      const announced = out.deltas.find(
+        (delta): delta is Extract<Delta, { type: 'INSERT_NODE' }> =>
+          delta.type === 'INSERT_NODE',
+      );
+      expect(announced?.node.data.paintKey).toBe(stored?.data.paintKey);
+    });
+
     it('names the stored revision of what a delta replay (a Review revert) wrote', async () => {
       const forward = await run([
         mergeProperties('pdf', { Venue: 'CHI 25', Status: 'Reading' }),

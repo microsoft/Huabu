@@ -35,10 +35,8 @@
 import { z } from 'zod';
 
 import { CANVAS_PRESENCE_LIMITS } from './canvas-presence-limits.js';
-import { isSetSiblingOrderEvent } from '../../canvas-engine/siblingOrder.js';
 
 import type { CanvasChangeRecord } from '../../canvas-engine/change.js';
-import type { SetSiblingOrderEvent } from '../../canvas-engine/siblingOrder.js';
 
 /**
  * The id a browser page gives itself (one per loaded document). The one shape
@@ -116,13 +114,6 @@ export const canvasSyncEventSchema = z.discriminatedUnion('type', [
       /** Structural deltas between prestate and poststate, in apply order. */
       deltas: z.array(z.unknown()),
       pendingEffects: canvasSyncPendingEffectsSchema,
-      /**
-       * Sibling paint order of every parent the batch changed, replayed
-       * after `deltas`. Absent when no order changed.
-       */
-      orderEvents: z
-        .array(z.custom<SetSiblingOrderEvent>(isSetSiblingOrderEvent))
-        .optional(),
       /**
        * Stored content revision of every node whose saved content (a
        * sidecar field) this batch created or changed, keyed by node id — the

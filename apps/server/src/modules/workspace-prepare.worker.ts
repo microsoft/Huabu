@@ -24,7 +24,9 @@ if (!workspacePath) {
   finish({ ok: false, message: 'Workspace path argument is required' }, 1);
 } else {
   try {
-    prepareWorkspaceOnDisk(workspacePath);
+    prepareWorkspaceOnDisk(workspacePath, {
+      inUse: process.argv[3] === 'in-use',
+    });
     finish({ ok: true }, 0);
   } catch (error) {
     finish(

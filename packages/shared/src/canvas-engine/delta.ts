@@ -26,17 +26,14 @@
  * Review record) can be inverted into the insert that brings it back.
  * Edges are small and travel whole.
  *
- * Deltas do not encode sibling order. Ordered batches add complete sibling
- * lists and must be replayed/inverted as a whole, never row by row.
+ * Paint order is a node field (`data.paintKey`), so it travels in a node's
+ * row like any other field; {@link applyDeltas} returns the nodes in that
+ * order.
  *
  * Pure functions only — no host or network coupling.
  */
 
-import {
-  applySiblingOrderEvents,
-  SiblingOrderReplayError,
-  type SetSiblingOrderEvent,
-} from './siblingOrder.js';
+import { orderByPaintKeys } from './container/paintOrder.js';
 
 import type { CanvasEdge, CanvasNode } from './interfaces.js';
 
@@ -257,8 +254,6 @@ export function toWireDeltas(deltas: readonly Delta[]): Delta[] {
   );
 }
 
-/** Opt-in until hosts can consume atomic order batches rather than filtered rows. */
-export type OrderedDelta = Delta | SetSiblingOrderEvent;
 /** Replay recorded field changes without replacing later unrelated values. */
 export function replayChangedData(
   current: Record<string, unknown>,
@@ -276,17 +271,11 @@ export function replayChangedData(
 }
 
 /**
- * Invert one row. Membership/order restoration requires the complete inverted
- * batch. A `DELETE_NODE` reduced to an id ({@link toWireDeltas}) cannot be
- * inverted and throws. Retained orderVersion describes the recorded effect, not a live undo.
+ * Invert one row. A `DELETE_NODE` reduced to an id ({@link toWireDeltas})
+ * cannot be inverted and throws.
  */
-export function invertDelta<T extends OrderedDelta>(
-  delta: T,
-): T extends Delta ? Delta : SetSiblingOrderEvent;
-export function invertDelta(delta: OrderedDelta): OrderedDelta {
+export function invertDelta(delta: Delta): Delta {
   switch (delta.type) {
-    case 'SET_SIBLING_ORDER':
-      return { ...delta, before: delta.after, after: delta.before };
     case 'INSERT_NODE':
       return { type: 'DELETE_NODE', node: delta.node };
     case 'DELETE_NODE':
@@ -314,17 +303,16 @@ export function invertDelta(delta: OrderedDelta): OrderedDelta {
  * elements.
  *
  * A `REPLACE_NODE` is merged into the current node ({@link mergeNodeFields}).
- * Legacy entity-only input tolerates missing replacements/deletes. Input with
- * an order event uses strict atomic replay instead. New-protocol callers must
- * use applyOrderedDeltas even when a batch contains no order event.
+ * A replacement or deletion of a node that is not there is skipped.
+ *
+ * The returned nodes are in paint order by the keys they carry
+ * (`orderByPaintKeys`): a moved node's row changes its `data.paintKey`, and
+ * the array follows. Parent-before-child is the caller's `normalizeTreeOrder`.
  */
 export function applyDeltas(
   state: { nodes: readonly CanvasNode[]; edges: readonly CanvasEdge[] },
-  deltas: readonly OrderedDelta[],
+  deltas: readonly Delta[],
 ): { nodes: CanvasNode[]; edges: CanvasEdge[] } {
-  if (deltas.some((delta) => delta.type === 'SET_SIBLING_ORDER')) {
-    return applyOrderedDeltas(state, deltas);
-  }
   // Work in mutable copies indexed by id for O(1) lookup; rebuild
   // ordered arrays at the end so any pure consumers (React, server
   // diff) see a stable element order.
@@ -372,60 +360,7 @@ export function applyDeltas(
   }
 
   return {
-    nodes: Array.from(nodeMap.values()),
+    nodes: orderByPaintKeys(Array.from(nodeMap.values())),
     edges: Array.from(edgeMap.values()),
   };
-}
-
-/**
- * Replay one complete ordered batch against its exact baseline. Throws before
- * publishing any result on missing entities/lists, stale order or invalid trees.
- * This is isolated replay, not concurrent undo or draft reconciliation.
- */
-export function applyOrderedDeltas(
-  state: { nodes: readonly CanvasNode[]; edges: readonly CanvasEdge[] },
-  deltas: readonly OrderedDelta[],
-): { nodes: CanvasNode[]; edges: CanvasEdge[] } {
-  const nodeIds = new Set(state.nodes.map((node) => node.id));
-  const edgeIds = new Set(state.edges.map((edge) => edge.id));
-  if (edgeIds.size !== state.edges.length) {
-    throw new SiblingOrderReplayError('Duplicate edge IDs');
-  }
-  const entities: Delta[] = [];
-  const orders: SetSiblingOrderEvent[] = [];
-  for (const delta of deltas) {
-    if (delta.type === 'SET_SIBLING_ORDER') {
-      orders.push(delta);
-      continue;
-    }
-    const isNode = delta.type.endsWith('_NODE');
-    const ids = isNode ? nodeIds : edgeIds;
-    const entity =
-      'node' in delta ? delta.node : 'edge' in delta ? delta.edge : delta.next;
-    if (delta.type.startsWith('INSERT_')) {
-      if (ids.has(entity.id)) {
-        throw new SiblingOrderReplayError(`Duplicate insert: ${entity.id}`);
-      }
-      ids.add(entity.id);
-    } else {
-      if (
-        !ids.has(entity.id) ||
-        ('prev' in delta && delta.prev.id !== entity.id)
-      ) {
-        throw new SiblingOrderReplayError(
-          `Missing or mismatched entity: ${entity.id}`,
-        );
-      }
-      if (delta.type.startsWith('DELETE_')) ids.delete(entity.id);
-    }
-    entities.push(delta);
-  }
-  const result = applyDeltas(state, entities);
-  result.nodes = applySiblingOrderEvents(state.nodes, result.nodes, orders);
-  for (const edge of result.edges) {
-    if (!nodeIds.has(edge.source) || !nodeIds.has(edge.target)) {
-      throw new SiblingOrderReplayError(`Missing edge endpoint: ${edge.id}`);
-    }
-  }
-  return result;
 }

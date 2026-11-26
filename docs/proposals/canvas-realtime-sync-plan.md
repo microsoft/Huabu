@@ -12,7 +12,7 @@ Last updated: 2026-11-12
 >
 > The text below is kept as written and is not updated to match.
 
-This is the repository contract and implementation handoff for the Space's A–F plan. Architecture documents describe implemented behavior; this document does not advertise available production APIs or storage guarantees. The bounded B implementation is documented under [sibling paint order and isolated replay](../architecture/canvas-command-architecture.md#sibling-paint-order-and-isolated-replay); unimplemented protocol and migration behavior below remains proposed. The [July roadmap](../archive/canvas-realtime-sync-roadmap-2026-07.md) is superseded, including its intermediate whole-Space PUT broadcast and own-client echo-filter plan.
+This is the repository contract and implementation handoff for the Space's A–F plan. Architecture documents describe implemented behavior; this document does not advertise available production APIs or storage guarantees. The bounded B implementation is documented under [sibling paint order](../architecture/canvas-command-architecture.md#sibling-paint-order) (the sibling-order events of phase B were since replaced by per-node order keys, see [unified-node-order.md](./unified-node-order.md)); unimplemented protocol and migration behavior below remains proposed. The [July roadmap](../archive/canvas-realtime-sync-roadmap-2026-07.md) is superseded, including its intermediate whole-Space PUT broadcast and own-client echo-filter plan.
 
 ## 1. Scope and delivery boundary
 

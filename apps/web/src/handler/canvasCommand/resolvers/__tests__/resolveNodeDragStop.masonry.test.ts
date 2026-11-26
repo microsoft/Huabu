@@ -4,8 +4,10 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  describeFrameLayout,
   describeStructuredDropZone,
   executeCanvasCommands,
+  seedNodeOrder,
   solveStructuredFrameLayout,
 } from '@huabu/shared/canvas-engine';
 
@@ -43,7 +45,9 @@ describe.each(['column', 'row'] as const)(
     ])(
       'commits the previewed insertion and peer positions ($sizing, sole source: $soleSource)',
       ({ sizing, soleSource }) => {
-        const initial: Node[] = [
+        // Stored the old way (a list on the Frame) and read as every stored
+        // Space is: the list becomes the children's own track keys.
+        const initial: Node[] = seedNodeOrder([
           {
             id: 'frame',
             type: 'frame',
@@ -65,7 +69,7 @@ describe.each(['column', 'row'] as const)(
           child('before', 1, 60),
           child('after', 1, 90),
           child('last', 1, 60),
-        ];
+        ]);
         const layout = solveStructuredFrameLayout(initial, 'frame', 'compact');
         if (!layout) throw new Error('Missing fixture layout');
         const laidOut = initial.map((node) => ({
@@ -139,8 +143,12 @@ describe.each(['column', 'row'] as const)(
           'after',
           'last',
         ]);
-        const order = committed.find((node) => node.id === 'frame')?.data
-          .layoutOrder as string[][];
+        expect(
+          committed.find((node) => node.id === 'frame')?.data,
+        ).not.toHaveProperty('layoutOrder');
+        const described = describeFrameLayout(committed, 'frame');
+        const order =
+          described && 'tracks' in described ? described.tracks : [];
         expect(order[dropped.data[field] as number]).toEqual([
           'before',
           'dragged',
@@ -149,5 +157,70 @@ describe.each(['column', 'row'] as const)(
         ]);
       },
     );
+
+    it('commits a drop further along the track the child was already in', () => {
+      const initial: Node[] = seedNodeOrder([
+        {
+          id: 'frame',
+          type: 'frame',
+          position: { x: 100, y: 200 },
+          data: {
+            layoutMode: axis,
+            gridCount: 1,
+            sizing: 'manual',
+            layoutOrder: [['dragged', 'second', 'third']],
+          },
+          style: { width: 800, height: 800 },
+          measured: { width: 800, height: 800 },
+        },
+        child('dragged', 0, 60),
+        child('second', 0, 60),
+        child('third', 0, 60),
+      ]);
+      const layout = solveStructuredFrameLayout(initial, 'frame', 'compact');
+      if (!layout) throw new Error('Missing fixture layout');
+      const laidOut = initial.map((node) => ({
+        ...node,
+        position: layout.childPositions.get(node.id) ?? node.position,
+      }));
+      const second = layout.childPositions.get('second');
+      const third = layout.childPositions.get('third');
+      if (!second || !third) throw new Error('Missing track peers');
+      // Dropped between the second and the third child of its own track.
+      const position = {
+        ...second,
+        [along]: (second[along] + third[along]) / 2 + 10,
+      };
+      const nodes = laidOut.map((node) =>
+        node.id === 'dragged' ? { ...node, position } : node,
+      );
+      const resolution = resolveUiIntent(
+        {
+          type: 'NODE_DRAG_STOP',
+          draggedNodeIds: ['dragged'],
+          pointerFlowPosition: {
+            x: 100 + position.x + (column ? 60 : 20),
+            y: 200 + position.y + (column ? 20 : 60),
+          },
+          cachedDecisions: new Map([
+            ['dragged', { unframe: false, enterFrameId: null }],
+          ]),
+        },
+        { nodes, edges: [] },
+      );
+      const committed = executeCanvasCommands(
+        { source: 'ui', commands: resolution.commands },
+        { nodes, edges: [], canvasId: 'canvas' },
+      ).writeResult.nodes;
+      const described = describeFrameLayout(committed, 'frame');
+      expect(
+        described && 'tracks' in described ? described.tracks : [],
+      ).toEqual([['second', 'dragged', 'third']]);
+      // And it stands where it reads: no snap back to the front.
+      const along0 = (id: string) =>
+        committed.find((node) => node.id === id)?.position[along] ?? 0;
+      expect(along0('second')).toBeLessThan(along0('dragged'));
+      expect(along0('dragged')).toBeLessThan(along0('third'));
+    });
   },
 );
