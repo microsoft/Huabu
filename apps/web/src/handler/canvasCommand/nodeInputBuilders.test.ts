@@ -3,7 +3,12 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { uploadAudio, uploadHtml, uploadPdf } from '@/api/artifact';
+import {
+  uploadAudio,
+  uploadHtml,
+  uploadOffice,
+  uploadPdf,
+} from '@/api/artifact';
 import { toast } from '@/components/Common/Toast';
 import { pageLifecycle } from '@/utils/pageLifecycle';
 
@@ -158,6 +163,24 @@ describe('file import lifecycle', () => {
       expect.objectContaining({ nodeType: 'web' }),
     ]);
     expect(toast).not.toHaveBeenCalled();
+  });
+
+  it('reads the Office format from a file name that contains #', async () => {
+    vi.mocked(uploadOffice).mockResolvedValueOnce('artifact.xlsx');
+    const addNodes = vi.fn();
+    await importFilesAsNodes(
+      [new File(['sheet'], 'sheet#1.xlsx', { type: '' })],
+      undefined,
+      { type: 'user-uploaded' },
+      'space',
+      addNodes,
+    );
+    expect(addNodes).toHaveBeenCalledWith([
+      expect.objectContaining({
+        nodeType: 'office',
+        data: expect.objectContaining({ format: 'xlsx' }),
+      }),
+    ]);
   });
 
   it('names the files it cannot import and still imports the rest', async () => {

@@ -16,8 +16,7 @@ const OFFICE_EXTS = ['docx', 'pptx', 'xlsx'];
 export const detectOfficeFormat = (
   filename: string,
 ): 'docx' | 'pptx' | 'xlsx' | null => {
-  const cleanPath = filename.split('?')[0].split('#')[0];
-  const ext = cleanPath.split('.').pop()?.toLowerCase();
+  const ext = filename.split('.').pop()?.toLowerCase();
   if (ext === 'docx') return 'docx';
   if (ext === 'pptx') return 'pptx';
   if (ext === 'xlsx') return 'xlsx';
