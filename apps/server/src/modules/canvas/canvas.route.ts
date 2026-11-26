@@ -7,7 +7,7 @@ import { mkdir, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import archiver from 'archiver';
+import { ZipArchive } from 'archiver';
 import yauzl from 'yauzl';
 
 import {
@@ -1848,7 +1848,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       )
       .header('Content-Type', 'application/zip');
 
-    const archive = archiver('zip', { zlib: { level: 6 } });
+    const archive = new ZipArchive({ zlib: { level: 6 } });
     archive.on('warning', (err) => {
       request.log.warn({ err }, 'archiver warning during export');
     });

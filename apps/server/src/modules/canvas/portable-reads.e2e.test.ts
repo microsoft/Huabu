@@ -30,7 +30,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import multipart from '@fastify/multipart';
-import archiver from 'archiver';
+import { ZipArchive } from 'archiver';
 import fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -227,7 +227,7 @@ function multipartBody(
 
 /** Build a Space bundle by hand, so an older on-the-wire shape can be replayed. */
 async function makeBundle(entries: Record<string, string>): Promise<Buffer> {
-  const archive = archiver('zip', { zlib: { level: 0 } });
+  const archive = new ZipArchive({ zlib: { level: 0 } });
   const chunks: Buffer[] = [];
   archive.on('data', (chunk: Buffer) => chunks.push(chunk));
   const finished = new Promise<void>((resolve, reject) => {

@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 
-import archiver from 'archiver';
+import { ZipArchive } from 'archiver';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../agent/functional-text.js', () => ({ runFunctionalText: vi.fn() }));
@@ -65,7 +65,7 @@ function textPdf(text: string): Buffer {
 
 /** A Word document with one paragraph. */
 async function docx(text: string): Promise<Buffer> {
-  const zip = archiver('zip');
+  const zip = new ZipArchive();
   const out = new PassThrough();
   const chunks: Buffer[] = [];
   out.on('data', (chunk: Buffer) => chunks.push(chunk));
