@@ -19,3 +19,8 @@ export function fileReferenceData(reference: FileReference) {
     fileReference: reference,
   };
 }
+
+/** True when a device path names a `.pdf` file. */
+export function isPdfDevicePath(path: string): boolean {
+  return /\.pdf$/i.test(deviceFileName(path));
+}

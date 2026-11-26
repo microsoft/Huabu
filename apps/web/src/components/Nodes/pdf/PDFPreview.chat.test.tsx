@@ -135,9 +135,9 @@ async function capturePdf() {
     >[0]),
   );
   const page = mocks.page.mock.lastCall?.[0];
-  assert(page);
+  assert(page?.onAreaCaptured);
   await act(async () =>
-    page.onAreaCaptured({
+    page.onAreaCaptured?.({
       pageIndex: 0,
       position: { x: 10, y: 10 },
       captureRect: { x: 0, y: 0, width: 0.5, height: 0.5 },
