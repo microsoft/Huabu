@@ -27,6 +27,7 @@ class FilesystemProxy implements Agent {
       update: { sessionUpdate: 'available_commands_update', availableCommands: [
         { name: 'fs-list', description: 'List a directory (filesystem contract v1)', input: { hint: '{"path":"/absolute/path","cursor":"optional","limit":100,"showHidden":false}' } },
         { name: 'fs-read', description: 'Read UTF-8 text (filesystem contract v1)', input: { hint: '{"path":"/absolute/path","cursor":"optional","limitBytes":65536}' } },
+        { name: 'fs-read-bytes', description: 'Read binary bytes as base64 (filesystem contract v1)', input: { hint: '{"path":"/absolute/path","cursor":"optional","limitBytes":262144,"maxSizeBytes":33554432}' } },
       ] },
     })
     return { sessionId: this.sessionId }
@@ -34,11 +35,11 @@ class FilesystemProxy implements Agent {
   async prompt(params: PromptRequest): Promise<PromptResponse> {
     if (params.sessionId !== this.sessionId || this.active) throw RequestError.invalidParams('Invalid or busy proxy session')
     if (params.prompt.length !== 1 || params.prompt[0]?.type !== 'text') throw RequestError.invalidParams('Expected one command text block')
-    const match = /^\/(fs-list|fs-read) ([\s\S]+)$/.exec(params.prompt[0].text)
+    const match = /^\/(fs-list|fs-read|fs-read-bytes) ([\s\S]+)$/.exec(params.prompt[0].text)
     if (!match) throw RequestError.invalidParams('Unknown filesystem command')
     let input: unknown
     try { input = JSON.parse(match[2]!) } catch { throw RequestError.invalidParams('Expected JSON command arguments') }
-    const operation = match[1] === 'fs-list' ? 'fs-list' : 'fs-read'
+    const operation = match[1] === 'fs-list' ? 'fs-list' : match[1] === 'fs-read' ? 'fs-read' : 'fs-read-bytes'
     const controller = new AbortController()
     this.active = controller
     try {
