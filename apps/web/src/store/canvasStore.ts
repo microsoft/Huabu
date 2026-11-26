@@ -4159,6 +4159,10 @@ const useCanvasStore = create<RFState>()(
       get()._setStateRaw({
         nodes: orderedNodes as Node[],
         edges: applied.edges as Edge[],
+        // The raw setter does not follow the history; an update can have
+        // added an entry above, and the undo buttons read these.
+        canUndo: canvasHistoryManager.canUndo,
+        canRedo: canvasHistoryManager.canRedo,
       });
       adoptVersion(toVersion);
 
