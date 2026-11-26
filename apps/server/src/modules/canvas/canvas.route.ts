@@ -47,7 +47,6 @@ import {
   applyDeltasOnServer,
   executeOnServer,
   toExecuteResponse,
-  toWirePendingEffects,
 } from './canvas-executor.js';
 import { searchCanvas } from './canvas-search.js';
 import { publishCanvasUpdate } from './canvas-sync.js';
@@ -1583,26 +1582,12 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         return reply.send({ removed: false });
       }
       try {
-        const out = await applyDeltasOnServer({
+        await applyDeltasOnServer({
           canvasId,
           deltas: record.revertDeltas,
           change: record,
           originator: { source: 'ui' },
         });
-        if (out.toVersion > out.fromVersion) {
-          publishCanvasUpdate(canvasId, {
-            type: 'update',
-            data: {
-              fromVersion: out.fromVersion,
-              toVersion: out.toVersion,
-              deltas: out.deltas,
-              pendingEffects: toWirePendingEffects(out.pendingEffects),
-              ...(out.nodeContentRevisions
-                ? { nodeContentRevisions: out.nodeContentRevisions }
-                : {}),
-            },
-          });
-        }
       } catch (err) {
         if (err instanceof CanvasNotFoundError) {
           return reply.code(404).send({ message: 'Canvas not found' });

@@ -5,7 +5,7 @@
  * What the server does about a write once it is committed.
  *
  * Writes are committed in two places: the executor (command batches, from
- * pages and Agents alike) and the node-content save (a title, a source or a
+ * pages and Agents alike, and delta replays) and the node-content save (a title, a source or a
  * body a page saves). Neither knows what a write implies for other
  * subsystems. A subsystem that reacts to committed writes (today:
  * preprocessing) installs itself here when the server is assembled, so the
@@ -15,7 +15,7 @@
 import type { NodeContent } from '../storage/index.js';
 import type { CanvasNode, Delta } from '@huabu/shared/canvas-engine';
 
-/** A command batch as the executor committed it. */
+/** A command batch, or a delta replay, as the executor committed it. */
 export interface CanvasCommit {
   canvasId: string;
   /**
@@ -25,7 +25,10 @@ export interface CanvasCommit {
   deltas: readonly Delta[];
   prestateNodes: readonly CanvasNode[];
   finalNodes: readonly CanvasNode[];
-  /** Nodes a `RESTORE_NODES` command of the batch put back (an undo). */
+  /**
+   * Nodes the batch put back: by a `RESTORE_NODES` command (an undo), or
+   * every node a delta replay inserted (a reverted deletion).
+   */
   restoredNodeIds: readonly string[];
 }
 

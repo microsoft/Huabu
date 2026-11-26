@@ -690,18 +690,15 @@ export default function ComponentShowcasePage() {
                 tone="danger"
                 size="sm"
                 onClick={() =>
-                  toast(
-                    "This canvas was modified elsewhere. Your recent edits won't be saved.",
-                    {
-                      tone: 'danger',
-                      duration: 0,
-                      action: {
-                        label: 'Reload',
-                        onClick: () =>
-                          toast('Would reload page', { tone: 'neutral' }),
-                      },
+                  toast('Some changes could not be sent to the server.', {
+                    tone: 'danger',
+                    duration: 0,
+                    action: {
+                      label: 'Reload and discard unsent changes',
+                      onClick: () =>
+                        toast('Would reload page', { tone: 'neutral' }),
                     },
-                  )
+                  })
                 }
               >
                 Danger + Reload
