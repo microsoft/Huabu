@@ -7,10 +7,19 @@
  * useCanvasShortcuts.ts (paste) to eliminate duplication.
  */
 
+import { createId, type NodeOrigin } from '@huabu/shared';
+
 import { toast } from '@/components/Common/Toast';
 import { i18n } from '@/i18n';
+import useCanvasStore from '@/store/canvasStore';
+import { useImportPlaceholderStore } from '@/store/importPlaceholderStore';
+import { getCanvasViewportCenter } from '@/utils/canvasViewport';
 import { pageLifecycle } from '@/utils/pageLifecycle';
 
+import {
+  computeMediaSize,
+  viewportCenterAnchor,
+} from './resolvers/resolveAddNodes';
 import {
   uploadAudio,
   uploadHtml,
@@ -29,65 +38,47 @@ import {
 } from '../../utils/io/media';
 
 import type { AddNodeInput } from './uiIntent';
-import type { NodeOrigin } from '@huabu/shared';
 
 type Point = { x: number; y: number };
 
-/**
- * Upload a file and return an `AddNodeInput` ready for `addNode`.
- * Returns `null` for unsupported file types; upload failures reject.
- */
-export async function uploadFileToNodeInput(
+type Dimensions = { width: number; height: number };
+type FileNodeType = NonNullable<ReturnType<typeof detectFileNodeType>>;
+
+/** Read the intrinsic size of an image or video from the local file. */
+function measureFile(
   file: File,
+  type: FileNodeType,
+): Promise<Dimensions | undefined> {
+  if (type === 'image')
+    return getImageDimensionsFromBlob(file).catch(() => undefined);
+  // A codec the browser cannot decode still deserves a node — it just
+  // falls back to the default size instead of the real aspect ratio.
+  if (type === 'video')
+    return getVideoDimensionsFromBlob(file).catch(() => undefined);
+  return Promise.resolve(undefined);
+}
+
+/** Upload a file and return an `AddNodeInput` ready for `addNode`. */
+async function uploadFileToNodeInput(
+  file: File,
+  type: FileNodeType,
+  dimensions: Promise<Dimensions | undefined>,
   placementPoint: Point | undefined,
   origin: NodeOrigin,
   canvasId: string,
-): Promise<AddNodeInput | null> {
-  const type = detectFileNodeType(file);
-
-  if (type === 'image') {
+): Promise<AddNodeInput> {
+  if (type === 'image' || type === 'video') {
     const [src, naturalDimensions] = await Promise.all([
-      uploadImage(file, canvasId),
-      getImageDimensionsFromBlob(file).catch(() => undefined),
+      type === 'image'
+        ? uploadImage(file, canvasId)
+        : uploadVideo(file, canvasId),
+      dimensions,
     ]);
     return {
-      nodeType: 'image',
+      nodeType: type,
       placementPoint,
       data: { src, label: file.name, origin },
       naturalDimensions,
-    };
-  }
-
-  if (type === 'video') {
-    const [src, naturalDimensions] = await Promise.all([
-      uploadVideo(file, canvasId),
-      // A codec the browser cannot decode still deserves a node — it just
-      // falls back to the default size instead of the real aspect ratio.
-      getVideoDimensionsFromBlob(file).catch(() => undefined),
-    ]);
-    return {
-      nodeType: 'video',
-      placementPoint,
-      data: { src, label: file.name, origin },
-      naturalDimensions,
-    };
-  }
-
-  if (type === 'audio') {
-    const src = await uploadAudio(file, canvasId);
-    return {
-      nodeType: 'audio',
-      placementPoint,
-      data: { src, label: file.name, origin },
-    };
-  }
-
-  if (type === 'pdf') {
-    const src = await uploadPdf(file, canvasId);
-    return {
-      nodeType: 'pdf',
-      placementPoint,
-      data: { src, label: file.name, origin },
     };
   }
 
@@ -115,19 +106,65 @@ export async function uploadFileToNodeInput(
     };
   }
 
-  if (type === 'web') {
-    // Local .html / .htm file dropped onto the canvas. Upload as an
-    // artifact and store the resulting key in `data.src` — the
-    // preprocess pipeline branch in input-resolve detects the missing
-    // `http://` scheme and reads the file from disk.
-    const src = await uploadHtml(file, canvasId);
-    return {
-      nodeType: 'web',
-      placementPoint,
-      data: { src, label: file.name, origin },
-    };
-  }
-  return null;
+  // A local .html / .htm file is uploaded as an artifact and its key is
+  // stored in `data.src` — the preprocess pipeline branch in input-resolve
+  // detects the missing `http://` scheme and reads the file from disk.
+  const upload = { audio: uploadAudio, pdf: uploadPdf, web: uploadHtml }[type];
+  const src = await upload(file, canvasId);
+  return {
+    nodeType: type,
+    placementPoint,
+    data: { src, label: file.name, origin },
+  };
+}
+
+/**
+ * Put a card where the file's node will appear, and return its id. Without
+ * a placement point the node is centred in the viewport, so the card is too;
+ * when the viewport is not known yet no card is shown.
+ */
+function showImportPlaceholder(
+  file: File,
+  type: FileNodeType,
+  placementPoint: Point | undefined,
+  staggerIndex: number,
+  canvasId: string,
+  dimensions: Promise<Dimensions | undefined>,
+): string | undefined {
+  const center = placementPoint
+    ? undefined
+    : getCanvasViewportCenter(useCanvasStore.getState());
+  const rectFor = (natural?: Dimensions) => {
+    const size = computeMediaSize(
+      type,
+      natural?.width ?? 0,
+      natural?.height ?? 0,
+    );
+    const position =
+      placementPoint ??
+      (center && viewportCenterAnchor(type, size, center, staggerIndex));
+    return position && typeof size.height === 'number'
+      ? { ...position, width: size.width, height: size.height }
+      : undefined;
+  };
+  const rect = rectFor();
+  if (!rect) return undefined;
+
+  const { show, update } = useImportPlaceholderStore.getState();
+  const id = createId('import');
+  show({
+    id,
+    canvasId,
+    nodeType: type,
+    name: file.name,
+    ...rect,
+    ...(type === 'image' && { previewUrl: URL.createObjectURL(file) }),
+  });
+  void dimensions.then((natural) => {
+    const measured = natural && rectFor(natural);
+    if (measured) update(id, measured);
+  });
+  return id;
 }
 
 export async function importFilesAsNodes(
@@ -137,22 +174,58 @@ export async function importFilesAsNodes(
   canvasId: string,
   addNodes: (inputs: AddNodeInput[]) => void,
 ): Promise<void> {
+  const unsupported: File[] = [];
+  const imports = files.flatMap((file, index) => {
+    const type = detectFileNodeType(file);
+    if (!type) {
+      unsupported.push(file);
+      return [];
+    }
+    const position = placementPoint && {
+      x: placementPoint.x + index * 30,
+      y: placementPoint.y + index * 30,
+    };
+    return [{ file, type, position, dimensions: measureFile(file, type) }];
+  });
+  if (unsupported.length)
+    toast(
+      i18n.t('node.unsupportedFileType', {
+        names: unsupported.map((file) => file.name).join(', '),
+      }),
+      { tone: 'danger' },
+    );
+  // A note is read locally, so it needs no card while it "uploads".
+  const placeholderIds = imports.map(
+    ({ file, type, position, dimensions }, index) =>
+      type === 'note'
+        ? undefined
+        : showImportPlaceholder(
+            file,
+            type,
+            position,
+            index,
+            canvasId,
+            dimensions,
+          ),
+  );
+  const placeholders = useImportPlaceholderStore.getState();
+  // A failed card already says what went wrong; a toast would repeat it.
+  let failureIsOnCards = false;
+
   try {
     await pageLifecycle.run('importing', async () => {
       const results = await Promise.allSettled(
-        files.map(async (file, index) => {
-          const position = placementPoint && {
-            x: placementPoint.x + index * 30,
-            y: placementPoint.y + index * 30,
-          };
+        imports.map(async ({ file, type, position, dimensions }) => {
           const input = await uploadFileToNodeInput(
             file,
+            type,
+            dimensions,
             position,
             origin,
             canvasId,
           );
           if (
-            input?.data &&
+            input.data &&
             origin.type === 'user-pasted' &&
             file.name === 'pasted-image'
           )
@@ -161,33 +234,45 @@ export async function importFilesAsNodes(
         }),
       );
       const inputs = results.flatMap((result) =>
-        result.status === 'fulfilled' && result.value ? [result.value] : [],
+        result.status === 'fulfilled' ? [result.value] : [],
       );
       if (inputs.length) addNodes(inputs);
-      const unsupported = files.filter(
-        (_file, index) =>
-          results[index].status === 'fulfilled' && !results[index].value,
-      );
-      if (unsupported.length)
-        toast(
-          i18n.t('node.unsupportedFileType', {
-            names: unsupported.map((file) => file.name).join(', '),
-          }),
-          { tone: 'danger' },
-        );
+      // The nodes and the cards change in one render: a card that succeeded
+      // gives way to its node, a card that failed stays and offers a retry.
+      results.forEach((result, index) => {
+        const id = placeholderIds[index];
+        if (!id) return;
+        if (result.status === 'fulfilled') return placeholders.remove(id);
+        const { file, position } = imports[index];
+        placeholders.update(id, {
+          error: failureMessage(result.reason),
+          retry: () => {
+            placeholders.remove(id);
+            void importFilesAsNodes(
+              [file],
+              position,
+              origin,
+              canvasId,
+              addNodes,
+            );
+          },
+        });
+      });
       const failed = results.find((result) => result.status === 'rejected');
+      failureIsOnCards = results.every(
+        (result, index) =>
+          result.status === 'fulfilled' || placeholderIds[index],
+      );
       if (failed?.status === 'rejected') throw failed.reason;
     });
   } catch (error) {
     console.error('[import] Could not import files:', error);
-    toast(
-      error instanceof Error ? error.message : i18n.t('node.uploadFailed'),
-      {
-        tone: 'danger',
-      },
-    );
+    if (!failureIsOnCards) toast(failureMessage(error), { tone: 'danger' });
   }
 }
+
+const failureMessage = (error: unknown) =>
+  error instanceof Error ? error.message : i18n.t('node.uploadFailed');
 
 /**
  * Build an `AddNodeInput` from a URL string.

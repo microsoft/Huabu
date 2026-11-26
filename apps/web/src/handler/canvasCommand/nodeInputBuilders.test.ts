@@ -10,6 +10,7 @@ import {
   uploadPdf,
 } from '@/api/artifact';
 import { toast } from '@/components/Common/Toast';
+import { useImportPlaceholderStore } from '@/store/importPlaceholderStore';
 import { pageLifecycle } from '@/utils/pageLifecycle';
 
 import { importFilesAsNodes } from './nodeInputBuilders';
@@ -27,6 +28,7 @@ vi.mock('@/components/Common/Toast', () => ({ toast: vi.fn() }));
 afterEach(() => {
   vi.restoreAllMocks();
   vi.clearAllMocks();
+  useImportPlaceholderStore.setState({ placeholders: [] });
 });
 
 describe('file import lifecycle', () => {
@@ -204,5 +206,101 @@ describe('file import lifecycle', () => {
         tone: 'danger',
       },
     );
+  });
+
+  it('shows a card at the drop point until the node replaces it', async () => {
+    let uploaded!: (value: string) => void;
+    vi.mocked(uploadPdf).mockReturnValueOnce(
+      new Promise((resolve) => {
+        uploaded = resolve;
+      }),
+    );
+    const cards = () => useImportPlaceholderStore.getState().placeholders;
+    const addNodes = vi.fn(() => {
+      // The card is still there when the node is inserted, so the swap
+      // happens in one render.
+      expect(cards()).toHaveLength(1);
+    });
+    const importing = importFilesAsNodes(
+      [new File(['pdf'], 'document.pdf', { type: 'application/pdf' })],
+      { x: 10, y: 20 },
+      { type: 'user-uploaded' },
+      'space',
+      addNodes,
+    );
+    expect(cards()).toEqual([
+      expect.objectContaining({
+        canvasId: 'space',
+        nodeType: 'pdf',
+        name: 'document.pdf',
+        x: 10,
+        y: 20,
+        width: 400,
+        height: 400,
+      }),
+    ]);
+    expect(cards()[0].error).toBeUndefined();
+    uploaded('artifact.pdf');
+    await importing;
+    expect(addNodes).toHaveBeenCalledTimes(1);
+    expect(cards()).toEqual([]);
+  });
+
+  it('keeps a failed card and imports the file again on retry', async () => {
+    vi.mocked(uploadPdf)
+      .mockRejectedValueOnce(new Error('Upload offline'))
+      .mockResolvedValueOnce('artifact.pdf');
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const cards = () => useImportPlaceholderStore.getState().placeholders;
+    const addNodes = vi.fn();
+    await importFilesAsNodes(
+      [new File(['pdf'], 'document.pdf', { type: 'application/pdf' })],
+      { x: 10, y: 20 },
+      { type: 'user-uploaded' },
+      'space',
+      addNodes,
+    );
+    expect(addNodes).not.toHaveBeenCalled();
+    expect(cards()).toEqual([
+      expect.objectContaining({
+        name: 'document.pdf',
+        error: 'Upload offline',
+      }),
+    ]);
+
+    // The card carries the failure, so no toast repeats it.
+    expect(toast).not.toHaveBeenCalled();
+
+    cards()[0].retry?.();
+    expect(cards()).toEqual([
+      expect.objectContaining({ name: 'document.pdf', x: 10, y: 20 }),
+    ]);
+    expect(cards()[0].error).toBeUndefined();
+    await vi.waitFor(() => expect(cards()).toEqual([]));
+    expect(addNodes).toHaveBeenCalledWith([
+      expect.objectContaining({
+        nodeType: 'pdf',
+        placementPoint: { x: 10, y: 20 },
+        data: expect.objectContaining({ src: 'artifact.pdf' }),
+      }),
+    ]);
+  });
+
+  it('shows no card for a file it cannot import or for a note', async () => {
+    const addNodes = vi.fn();
+    await importFilesAsNodes(
+      [
+        new File(['zip'], 'archive.zip', { type: 'application/zip' }),
+        new File(['# Title'], 'readme.md', { type: 'text/markdown' }),
+      ],
+      { x: 0, y: 0 },
+      { type: 'user-uploaded' },
+      'space',
+      addNodes,
+    );
+    expect(addNodes).toHaveBeenCalledWith([
+      expect.objectContaining({ nodeType: 'note' }),
+    ]);
+    expect(useImportPlaceholderStore.getState().placeholders).toEqual([]);
   });
 });
