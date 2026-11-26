@@ -9,7 +9,6 @@
 const IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp'];
 const VIDEO_EXTS = ['mp4', 'webm', 'ogg', 'mov'];
 const AUDIO_EXTS = ['mp3', 'wav', 'm4a', 'aac', 'flac', 'oga'];
-const WEB_EXTS = ['html', 'htm', 'mhtml'];
 const OFFICE_EXTS = ['docx', 'pptx', 'xlsx'];
 
 /** Map an Office file extension onto the canonical `OfficeFormat` value. */
@@ -52,10 +51,11 @@ const detectTypeFromExtension = (name: string): FileNodeType | null => {
   if (ext === 'md' || ext === 'markdown') return 'note';
   if (VIDEO_EXTS.includes(ext)) return 'video';
   if (AUDIO_EXTS.includes(ext)) return 'audio';
-  // Local .html / .htm files and saved .mhtml snapshots are surfaced as web
-  // nodes — the uploader stores them as an artifact and the preprocessing
-  // pipeline extracts their content the same way it does for remote URLs.
-  if (WEB_EXTS.includes(ext)) return 'web';
+  // Local .html / .htm files are surfaced as web nodes — the uploader
+  // stores them as an artifact and the preprocessing pipeline extracts
+  // their content the same way it does for remote URLs. A saved .mhtml is
+  // left out: preprocessing would read the raw archive as HTML.
+  if (ext === 'html' || ext === 'htm') return 'web';
   return null;
 };
 

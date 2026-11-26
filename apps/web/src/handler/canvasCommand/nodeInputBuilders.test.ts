@@ -146,14 +146,11 @@ describe('file import lifecycle', () => {
     expect(uploadHtml).not.toHaveBeenCalled();
   });
 
-  it.each([
-    ['saved page.mhtml', 'message/rfc822'],
-    ['page#1.html', ''],
-  ])('imports %s (type "%s") as a web node', async (name, type) => {
+  it('imports an html file whose name contains # as a web node', async () => {
     vi.mocked(uploadHtml).mockResolvedValueOnce('artifact.html');
     const addNodes = vi.fn();
     await importFilesAsNodes(
-      [new File(['page'], name, { type })],
+      [new File(['page'], 'page#1.html', { type: '' })],
       undefined,
       { type: 'user-uploaded' },
       'space',
@@ -189,6 +186,7 @@ describe('file import lifecycle', () => {
     await importFilesAsNodes(
       [
         new File(['zip'], 'archive.zip', { type: 'application/zip' }),
+        new File(['page'], 'saved.mhtml', { type: 'message/rfc822' }),
         new File(['pdf'], 'document.pdf', { type: 'application/pdf' }),
       ],
       undefined,
@@ -200,8 +198,11 @@ describe('file import lifecycle', () => {
       expect.objectContaining({ nodeType: 'pdf' }),
     ]);
     expect(uploadHtml).not.toHaveBeenCalled();
-    expect(toast).toHaveBeenCalledWith(expect.stringContaining('archive.zip'), {
-      tone: 'danger',
-    });
+    expect(toast).toHaveBeenCalledWith(
+      expect.stringContaining('archive.zip, saved.mhtml'),
+      {
+        tone: 'danger',
+      },
+    );
   });
 });
