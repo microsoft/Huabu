@@ -949,7 +949,10 @@ describe('POST /api/canvas/:canvasId/changes/query', () => {
       });
 
       expect(res.statusCode).toBe(200);
-      expect(res.json()).toEqual({ threads: { 'thread-1': expected } });
+      expect(res.json()).toEqual({
+        threads: { 'thread-1': expected },
+        seen: {},
+      });
       expect(readChanges).toHaveBeenCalledTimes(2);
     } finally {
       await app.close();
@@ -973,6 +976,85 @@ describe('POST /api/canvas/:canvasId/changes/query', () => {
         payload: { threadIds: [] },
       });
       expect(unknown.statusCode).toBe(404);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe('/api/canvas/:canvasId/changes/seen', () => {
+  it('records what was seen, tells the Space’s pages, and prunes on the next query', async () => {
+    createCanvas('c1', 'Canvas One');
+    const events: unknown[] = [];
+    const unsubscribe = subscribeCanvasUpdates('c1', (event) => {
+      events.push(event);
+    });
+
+    const app = await buildApp();
+    try {
+      const marked = await app.inject({
+        method: 'POST',
+        url: '/canvas/c1/changes/seen',
+        payload: {
+          seen: [{ threadId: 'thread-1', nodeId: 'n1', key: 'change@f1' }],
+        },
+      });
+      expect(marked.statusCode).toBe(200);
+      expect(marked.json()).toEqual({
+        seen: { 'thread-1': { n1: 'change@f1' } },
+      });
+      expect(events).toEqual([
+        { type: 'invalidate', data: { seenChanged: true } },
+      ]);
+
+      const read = await app.inject({
+        method: 'GET',
+        url: '/canvas/c1/changes/seen',
+      });
+      expect(read.json()).toEqual({
+        seen: { 'thread-1': { n1: 'change@f1' } },
+      });
+
+      // The thread holds no review record, so the cell has nothing to say.
+      const queried = await app.inject({
+        method: 'POST',
+        url: '/canvas/c1/changes/query',
+        payload: { threadIds: ['thread-1'] },
+      });
+      expect(queried.json()).toEqual({ threads: {}, seen: {} });
+      const after = await app.inject({
+        method: 'GET',
+        url: '/canvas/c1/changes/seen',
+      });
+      expect(after.json()).toEqual({ seen: {} });
+    } finally {
+      unsubscribe();
+      await app.close();
+    }
+  });
+
+  it('rejects a malformed body and an unknown Space', async () => {
+    createCanvas('c1', 'Canvas One');
+
+    const app = await buildApp();
+    try {
+      const malformed = await app.inject({
+        method: 'POST',
+        url: '/canvas/c1/changes/seen',
+        payload: { seen: [] },
+      });
+      expect(malformed.statusCode).toBe(400);
+      const unknown = await app.inject({
+        method: 'POST',
+        url: '/canvas/missing/changes/seen',
+        payload: { seen: [{ threadId: 't', nodeId: 'n', key: 'k' }] },
+      });
+      expect(unknown.statusCode).toBe(404);
+      const unread = await app.inject({
+        method: 'GET',
+        url: '/canvas/missing/changes/seen',
+      });
+      expect(unread.statusCode).toBe(404);
     } finally {
       await app.close();
     }

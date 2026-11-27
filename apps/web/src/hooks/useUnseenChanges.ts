@@ -44,11 +44,23 @@ export function readUnseenMarks(): Map<string, UnseenMark> {
   );
 }
 
-/** Record a node's mark as seen, for every conversation it holds. */
-export function markSeen(mark: UnseenMark): void {
-  const store = useSeenChangesStore.getState();
-  for (const source of mark.sources)
-    store.markSeen(source.threadId, source.keys);
+/**
+ * Record nodes as seen: each one's mark, for every conversation it holds.
+ * A node that carries no mark is left alone.
+ */
+export function markNodesSeen(nodeIds: readonly string[]): void {
+  const marks = readUnseenMarks();
+  const cells = nodeIds.flatMap((nodeId) =>
+    (marks.get(nodeId)?.sources ?? []).map(({ threadId, key }) => ({
+      threadId,
+      nodeId,
+      key,
+    })),
+  );
+  if (cells.length === 0) return;
+  useSeenChangesStore
+    .getState()
+    .markSeen(useCanvasStore.getState().canvasId, cells);
 }
 
 /** How often, at most, the tracker reads the stores it follows. */
@@ -69,6 +81,11 @@ const RETRY_MAX_MS = 60_000;
 export function useTrackUnseenChanges(canvasId: string | undefined): void {
   useEffect(() => {
     if (!canvasId) return;
+    // What was seen is the Space's: another Space starts with nothing.
+    useSeenChangesStore.getState().reset();
+    // All of it, not only what comes with the conversations asked for below:
+    // a conversation without a Question node is seen through this alone.
+    void useSeenChangesStore.getState().refresh(canvasId);
     let live = true;
     const asked = new Set<string>();
     /** Asked for, and not read: to be asked for again. */
@@ -138,11 +155,7 @@ export function useTrackUnseenChanges(canvasId: string | undefined): void {
       }
       // Seen when the person moves on, not when they arrive: while they are
       // on the node its mark stays, and with it the way to the conversation.
-      const left =
-        selected !== null && marked
-          ? readUnseenMarks().get(selected)
-          : undefined;
-      if (left) markSeen(left);
+      if (selected !== null && marked) markNodesSeen([selected]);
       selected = only;
       marked = only !== null && readUnseenMarks().has(only);
     };

@@ -76,8 +76,16 @@ function personKey(principalId: string): string {
  * or the member's own in their personal settings namespace.
  */
 export function settingsRecordKey(name: ServerRecordName): ServerRecordKey {
+  return { owner: personalOwnerKey(), name };
+}
+
+/**
+ * The opaque key of the member this call is for, or `null` when it reads the
+ * deployment's own copy. For state kept per person outside server records.
+ */
+export function personalOwnerKey(): string | null {
   const owner = personalSettingsOwner();
-  return { owner: owner ? personKey(owner) : null, name };
+  return owner ? personKey(owner) : null;
 }
 
 /**

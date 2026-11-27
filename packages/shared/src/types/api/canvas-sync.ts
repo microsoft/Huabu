@@ -82,6 +82,12 @@ export const canvasSyncEventSchema = z.discriminatedUnion('type', [
        * that conversation's records again.
        */
       reviewThreadId: z.string().optional(),
+      /**
+       * Someone recorded what they have seen of the Space's changes. A page
+       * reads its own person's record again: it may be theirs, written from
+       * another device.
+       */
+      seenChanged: z.boolean().optional(),
     }),
   }),
   z.object({
@@ -213,11 +219,40 @@ export const querySpaceChangesBodySchema = z.object({
 });
 
 /**
+ * What one person has seen of the changes Agents made in a Space: per
+ * conversation, per node, the state of that node's review record they saw
+ * (its id and applied fingerprint). A node an Agent changes again has a
+ * record in another state, and is unseen again without this being written.
+ */
+export type SeenChanges = Record<string, Record<string, string>>;
+
+/** One cell of {@link SeenChanges}. */
+const seenChangeSchema = z.object({
+  threadId: z.string().min(1).max(256),
+  nodeId: z.string().min(1).max(256),
+  /** The record state seen: `<record id>@<applied fingerprint>`. */
+  key: z.string().min(1).max(512),
+});
+export type SeenChange = z.infer<typeof seenChangeSchema>;
+
+/** Body of `POST /api/canvas/:canvasId/changes/seen`. */
+export const markSeenChangesBodySchema = z.object({
+  seen: z.array(seenChangeSchema).min(1).max(500),
+});
+
+/** Response for `GET` and `POST /api/canvas/:canvasId/changes/seen`. */
+export interface SeenChangesResponse {
+  seen: SeenChanges;
+}
+
+/**
  * Response for `POST /api/canvas/:canvasId/changes/query`: the pending
- * review records of each named thread that has any.
+ * review records of each named thread that has any, and what the caller has
+ * seen of them.
  */
 export interface QuerySpaceChangesResponse {
   threads: Record<string, CanvasChangeRecord[]>;
+  seen: SeenChanges;
 }
 
 /**

@@ -17,6 +17,7 @@ import { CANVAS_PAGE_ID } from '@/store/canvasStore/sync/pageId';
 import { useChatStore } from '@/store/chatStore';
 import { usePanelStore } from '@/store/panelStore';
 import { openPreviewNode } from '@/store/previewWorkspace/actions';
+import { useSeenChangesStore } from '@/store/seenChangesStore';
 import { useWorkspaceStore } from '@/store/workspaceStore';
 
 import { subscribeCanvasSync } from './canvasSyncSubscription';
@@ -426,7 +427,10 @@ export const useCanvasSyncStore = create<CanvasSyncState>((set, get) => ({
       if (event.type === 'invalidate') {
         // A node-content save by another page. An event without node ids is
         // a read-model notice, and this page already shows its own saves.
-        const { nodeIds, originPageId, reviewThreadId } = event.data;
+        const { nodeIds, originPageId, reviewThreadId, seenChanged } =
+          event.data;
+        // The person may have seen something on another device.
+        if (seenChanged) void useSeenChangesStore.getState().refresh(canvasId);
         // A review record kept or reverted on another page: the list this
         // page holds for that conversation is out of date.
         if (reviewThreadId)

@@ -32,6 +32,7 @@ vi.mock('@/i18n', () => ({ supportedLngs: ['en', 'zh-CN'] }));
 vi.mock('@/utils/desktopStorage', () => ({
   writeApplicationPreference: mocks.write,
   readApplicationPreference: mocks.read,
+  subscribeApplicationPreferences: () => () => {},
 }));
 vi.mock('@/components/Common/Toast', () => ({ toast: mocks.toast }));
 vi.mock('@/components/Common/Select', () => ({
@@ -235,4 +236,28 @@ it('turns each kind of Agent notification off and on by itself', async () => {
   );
   await act(async () => toggle('settings.notifyTurnDone').click());
   expect(mocks.write).toHaveBeenLastCalledWith('huabu.notifyTurnDone', null);
+});
+
+it('turns the tags at the canvas edge off and on', async () => {
+  const toggle = () => {
+    const element = container.querySelector<HTMLElement>(
+      '[role="switch"][aria-label="settings.showEdgeTags"]',
+    );
+    if (!element) throw new Error('Missing switch: settings.showEdgeTags');
+    return element;
+  };
+  expect(toggle().getAttribute('aria-checked')).toBe('true');
+  mocks.read.mockImplementation((key) =>
+    key === 'huabu.showEdgeTags' ? 'false' : null,
+  );
+  await act(async () => toggle().click());
+  expect(mocks.write).toHaveBeenCalledExactlyOnceWith(
+    'huabu.showEdgeTags',
+    'false',
+  );
+  expect(toggle().getAttribute('aria-checked')).toBe('false');
+  mocks.read.mockImplementation(() => null);
+  await act(async () => toggle().click());
+  expect(mocks.write).toHaveBeenLastCalledWith('huabu.showEdgeTags', null);
+  expect(toggle().getAttribute('aria-checked')).toBe('true');
 });

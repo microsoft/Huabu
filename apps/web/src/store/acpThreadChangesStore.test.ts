@@ -5,17 +5,18 @@ import { beforeEach, expect, it, vi } from 'vitest';
 
 import useCanvasStore from '@/store/canvasStore';
 import { useSeenChangesStore } from '@/store/seenChangesStore';
-import { seenKey } from '@/utils/unseenChanges';
 
 import { useAcpThreadChangesStore } from './acpThreadChangesStore';
 
 import type { CanvasChangeRecord } from '@huabu/shared/canvas-engine';
 
-const mocks = vi.hoisted(() => ({ get: vi.fn(), accept: vi.fn() }));
+const mocks = vi.hoisted(() => ({ get: vi.fn(), query: vi.fn() }));
 vi.mock('@/api/threadChanges', () => ({
   getThreadChanges: mocks.get,
-  querySpaceChanges: vi.fn(),
-  acceptThreadChange: mocks.accept,
+  querySpaceChanges: mocks.query,
+  getSeenChanges: vi.fn(),
+  markSeenChanges: vi.fn(),
+  acceptThreadChange: vi.fn(),
   revertThreadChange: vi.fn(),
 }));
 
@@ -29,8 +30,8 @@ const record = (id: string): CanvasChangeRecord => ({
 
 beforeEach(() => {
   mocks.get.mockReset();
-  mocks.accept.mockReset();
-  useSeenChangesStore.setState({ seen: {} });
+  mocks.query.mockReset();
+  useSeenChangesStore.getState().reset();
   useCanvasStore.setState({ canvasId: 'c1' });
   useAcpThreadChangesStore.setState({ byThread: {}, liveThreads: {} });
 });
@@ -52,22 +53,15 @@ it('keeps a broadcast that arrived while an older read was in flight', async () 
   ).toEqual(['old', 'new']);
 });
 
-it('leaves a node seen when keeping its change fails, and forgets it once kept', async () => {
-  const kept = record('n1');
-  const log = vi.spyOn(console, 'error').mockImplementation(() => {});
-  useAcpThreadChangesStore.setState({ byThread: { t1: [kept] } });
-  useSeenChangesStore.getState().markSeen('t1', [seenKey(kept)]);
-  // The server refuses; the record comes back with the read that follows.
-  mocks.accept.mockRejectedValueOnce(new Error('offline'));
-  mocks.get.mockResolvedValue([kept]);
-  await useAcpThreadChangesStore.getState().accept('c1', 't1', 'n1');
-  await vi.waitFor(() =>
-    expect(useAcpThreadChangesStore.getState().byThread.t1).toHaveLength(1),
-  );
-  expect(useSeenChangesStore.getState().seen.t1).toEqual([seenKey(kept)]);
-  // Kept for good, its key has nothing left to mark seen.
-  mocks.accept.mockResolvedValueOnce({ removed: true });
-  await useAcpThreadChangesStore.getState().accept('c1', 't1', 'n1');
-  expect(useSeenChangesStore.getState().seen.t1).toBeUndefined();
-  log.mockRestore();
+it('takes what the person has seen along with a Space’s records', async () => {
+  mocks.query.mockResolvedValue({
+    threads: { t1: [record('n1')] },
+    seen: { t1: { n1: 'n1@' } },
+  });
+  expect(
+    await useAcpThreadChangesStore.getState().loadSpace('c1', ['t1', 't2']),
+  ).toBe(true);
+  expect(mocks.query).toHaveBeenCalledExactlyOnceWith('c1', ['t1', 't2']);
+  expect(useAcpThreadChangesStore.getState().byThread.t1).toHaveLength(1);
+  expect(useSeenChangesStore.getState().seen).toEqual({ t1: { n1: 'n1@' } });
 });

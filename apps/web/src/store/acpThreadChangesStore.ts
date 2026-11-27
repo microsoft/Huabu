@@ -13,7 +13,6 @@ import {
 } from '@/api/threadChanges';
 import useCanvasStore from '@/store/canvasStore';
 import { useSeenChangesStore } from '@/store/seenChangesStore';
-import { threadSeenKeys } from '@/utils/unseenChanges';
 
 import type { CanvasChangeRecord } from '@huabu/shared/canvas-engine';
 export { isChangeStale };
@@ -91,21 +90,6 @@ const SPACE_QUERY_BATCH = 500;
 
 const loadGenerationByThread = new Map<string, number>();
 
-/**
- * Forget the seen keys of records a thread no longer holds. Called only
- * where the list is the server's word — a read, a broadcast, a removal the
- * server confirmed — never after an optimistic removal: one that fails
- * brings its record back, and must find it still seen.
- */
-function settleSeen(threadId: string): void {
-  useSeenChangesStore
-    .getState()
-    .retain(
-      threadId,
-      threadSeenKeys(useAcpThreadChangesStore.getState().byThread[threadId]),
-    );
-}
-
 function removeFrom(
   byThread: Record<string, CanvasChangeRecord[]>,
   threadId: string,
@@ -150,7 +134,6 @@ export const useAcpThreadChangesStore = create<AcpThreadChangesState>(
             },
           };
         });
-        settleSeen(threadId);
       } catch (err) {
         console.error('[acpThreadChanges] load failed', err);
       }
@@ -160,13 +143,14 @@ export const useAcpThreadChangesStore = create<AcpThreadChangesState>(
       try {
         // The route takes a bounded list; a Space may hold more.
         for (let at = 0; at < threadIds.length; at += SPACE_QUERY_BATCH) {
-          const threads = await querySpaceChanges(
+          const { threads, seen } = await querySpaceChanges(
             canvasId,
             threadIds.slice(at, at + SPACE_QUERY_BATCH),
           );
           if (useCanvasStore.getState().canvasId !== canvasId) return true;
           set((s) => ({ byThread: { ...threads, ...s.byThread } }));
-          for (const threadId of Object.keys(threads)) settleSeen(threadId);
+          // What the person has seen of these conversations comes with them.
+          useSeenChangesStore.getState().adopt(seen);
         }
         return true;
       } catch (err) {
@@ -205,7 +189,6 @@ export const useAcpThreadChangesStore = create<AcpThreadChangesState>(
           [threadId]: Math.max(0, ...Object.values(s.liveThreads)) + 1,
         },
       }));
-      settleSeen(threadId);
     },
 
     accept: async (canvasId, threadId, changeId) => {
@@ -213,7 +196,6 @@ export const useAcpThreadChangesStore = create<AcpThreadChangesState>(
       set((s) => ({ byThread: removeFrom(s.byThread, threadId, changeId) }));
       try {
         await acceptThreadChange(canvasId, threadId, changeId);
-        settleSeen(threadId);
       } catch (err) {
         console.error('[acpThreadChanges] accept failed', err);
         void get().load(canvasId, threadId);
@@ -229,7 +211,6 @@ export const useAcpThreadChangesStore = create<AcpThreadChangesState>(
       // Any that failed is still the server's; read what it holds.
       if (kept.some((result) => result.status === 'rejected'))
         void get().load(canvasId, threadId);
-      else settleSeen(threadId);
     },
 
     revert: async (canvasId, threadId, changeId) => {
@@ -238,7 +219,6 @@ export const useAcpThreadChangesStore = create<AcpThreadChangesState>(
         // The canvas change itself lands via the sync broadcast that the
         // server emits while applying the inverse deltas.
         await revertThreadChange(canvasId, threadId, changeId);
-        settleSeen(threadId);
       } catch (err) {
         console.error('[acpThreadChanges] revert failed', err);
         void get().load(canvasId, threadId);
@@ -272,7 +252,6 @@ export const useAcpThreadChangesStore = create<AcpThreadChangesState>(
         }
       }
       if (failed) void get().load(canvasId, threadId);
-      else settleSeen(threadId);
     },
 
     isStale: (record) => {

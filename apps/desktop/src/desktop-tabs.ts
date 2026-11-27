@@ -68,6 +68,7 @@ const PREFERENCE_KEYS = [
   'huabu.minimapEnabled',
   'huabu.notifyTurnDone',
   'huabu.notifyNeedsYou',
+  'huabu.showEdgeTags',
 ];
 const isLegacyStorageKey = (key: string) =>
   PREFERENCE_KEYS.includes(key) ||

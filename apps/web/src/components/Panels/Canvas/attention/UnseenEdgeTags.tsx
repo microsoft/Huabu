@@ -13,11 +13,12 @@ import {
   type LayerFilterKey,
   type LayerFilterLabelKey,
 } from '@/components/Panels/CanvasLayerPanel/layerFilterKey';
-import { markSeen, useUnseenMarks } from '@/hooks/useUnseenChanges';
+import { markNodesSeen, useUnseenMarks } from '@/hooks/useUnseenChanges';
 import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
 import { ATTENTION_COLOR, type AttentionKind } from '@/utils/attention';
 import { getCanvasVisibleArea } from '@/utils/canvasViewport';
+import { useEdgeTagsEnabled } from '@/utils/edgeTagPreference';
 import { readConversations } from '@/utils/turnNotices';
 import {
   edgeTags,
@@ -372,6 +373,11 @@ function Tag({ tag, onGo, onDismiss }: TagProps) {
  * marks true. The numbers it is laid out by are in `edgeTagConfig.ts`.
  */
 export function UnseenEdgeTags() {
+  // A person may turn the tags off; the marks on the nodes stay.
+  return useEdgeTagsEnabled() ? <EdgeTags /> : null;
+}
+
+function EdgeTags() {
   const domNode = useStore((state) => state.domNode);
   const marks = useUnseenMarks();
   const reactFlow = useReactFlow();
@@ -440,22 +446,8 @@ export function UnseenEdgeTags() {
   );
   if (!domNode || !area || tags.length === 0) return null;
   const dismiss = (tag: EdgeTag) => {
-    // One write per conversation, however many nodes the piece has: each
-    // write copies and stores everything seen so far.
-    const keys = new Map<string, string[]>();
-    for (const node of tag.nodes)
-      for (const source of marks.get(node.id)?.sources ?? [])
-        keys.set(source.threadId, [
-          ...(keys.get(source.threadId) ?? []),
-          ...source.keys,
-        ]);
-    markSeen({
-      sources: [...keys].map(([threadId, seen]) => ({
-        threadId,
-        kind: 'update',
-        keys: seen,
-      })),
-    });
+    // One write for the whole piece, however many nodes it has.
+    markNodesSeen(tag.nodes.map((node) => node.id));
   };
   const go = (tag: EdgeTag) => {
     void reactFlow.setViewport(

@@ -9,6 +9,10 @@ import { Toggle } from '@/components/Common/Toggle';
 import { SettingRow } from '@/components/Settings/Common/SettingRow';
 import { getElectronBridge } from '@/hooks/useElectron';
 import {
+  useEdgeTagsEnabled,
+  writeEdgeTagsEnabled,
+} from '@/utils/edgeTagPreference';
+import {
   readNoticePreferences,
   writeNoticePreference,
 } from '@/utils/turnNoticePreferences';
@@ -25,13 +29,15 @@ function permitted(): boolean {
 
 /**
  * The two kinds of system notification about Agents, each with its own
- * switch. A browser must also grant permission: turning a switch on asks for
- * it, and without it both switches read as off.
+ * switch, and the switch for the tags at the canvas's edges. A browser must
+ * also grant permission for notifications: turning one of those switches on
+ * asks for it, and without it both read as off.
  */
 export const TurnNoticeSettings: React.FC = () => {
   const { t } = useTranslation();
   const [preferences, setPreferences] = useState(readNoticePreferences);
   const [allowed, setAllowed] = useState(permitted);
+  const edgeTags = useEdgeTagsEnabled();
 
   const change = useCallback(
     async (kind: keyof NoticePreferences, on: boolean) => {
@@ -78,6 +84,24 @@ export const TurnNoticeSettings: React.FC = () => {
           checked={allowed && preferences.needsYou}
           onChange={(on) => void change('needsYou', on)}
           label={t('settings.notifyNeedsYou')}
+        />
+      </SettingRow>
+      <SettingRow
+        title={t('settings.showEdgeTags')}
+        description={t('settings.showEdgeTagsDescription')}
+      >
+        <Toggle
+          checked={edgeTags}
+          onChange={(on) => {
+            try {
+              writeEdgeTagsEnabled(on);
+            } catch (error) {
+              toast(error instanceof Error ? error.message : String(error), {
+                tone: 'danger',
+              });
+            }
+          }}
+          label={t('settings.showEdgeTags')}
         />
       </SettingRow>
     </>

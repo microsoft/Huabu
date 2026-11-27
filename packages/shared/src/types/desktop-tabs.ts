@@ -111,7 +111,8 @@ export type DesktopPreferenceKey =
   | 'huabu:world-enabled'
   | 'huabu.minimapEnabled'
   | 'huabu.notifyTurnDone'
-  | 'huabu.notifyNeedsYou';
+  | 'huabu.notifyNeedsYou'
+  | 'huabu.showEdgeTags';
 
 export interface DesktopPreferenceChange {
   key: DesktopPreferenceKey;
