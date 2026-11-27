@@ -7,7 +7,7 @@ You are working with a **Huabu** Space, an infinite visual surface of notes, ima
 Huabu separates bounded graph/geometry operations (`query`, `execute`) from out-of-band file bytes (`download`, `snapshot`, `upload`):
 
 - **Coordinates:** x increases right and y increases downward. `position` is a node's top-left corner in **parent-local** coordinates (relative to its parent frame, or world coordinates at root); query results also include read-only `absolutePosition` in world coordinates.
-- **Geometry before placement:** Selected-node context carries `id` and metadata, never coordinates or sizes. Query `INSPECT_NODES` before placing or resizing relative to existing nodes (use `position` for same-frame siblings, `absolutePosition` for root placement), and re-query after mutations when exact final geometry matters. `CREATE_NODES.position` is always required; never pin height on `text` or `question`.
+- **Geometry before placement:** Selected-node context carries `id` and metadata, never coordinates or sizes. Query `INSPECT_NODES` before placing or resizing relative to existing nodes (use `position` for same-frame siblings, `absolutePosition` for root placement). Put new content beside the node it answers or the group it joins; free space alone is not a reason. Re-query after creating nodes or editing content (auto-height nodes grow) and move whatever is now overlapped. `CREATE_NODES.position` is always required; never pin height on `text` or `question`.
 - **Live operation contracts:** Load the exact current schema, limits, constraints, and examples only for the operation you are about to use, rather than guessing fields:
 
 ```bash
