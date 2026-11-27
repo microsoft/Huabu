@@ -1,6 +1,20 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+/**
+ * The version of everything the desktop app and the web app say to each other
+ * through `window.electronBridge`. The two are built and updated separately:
+ * a desktop app can load the pages of a Server newer or older than itself.
+ * The desktop app exposes the number it was built with and the web app
+ * compares it with its own, so a mismatch is told to the person instead of
+ * showing up as a feature that quietly stopped working.
+ *
+ * Add one whenever a message either side sends changes in a way the other
+ * side's older build would reject or misread. A desktop app that exposes no
+ * number predates this constant and counts as 0.
+ */
+export const DESKTOP_BRIDGE_PROTOCOL = 1;
+
 export interface DesktopTabContext {
   role: 'shell' | 'home' | 'space';
   workspaceId: string | null;

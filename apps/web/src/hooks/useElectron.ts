@@ -213,6 +213,11 @@ interface ElectronBridge {
     electron: string;
   };
   isElectron: true;
+  /**
+   * The `DESKTOP_BRIDGE_PROTOCOL` the desktop app was built with. Missing in
+   * a desktop app that predates the number.
+   */
+  protocol?: number;
   /** Whether Electron is connected to a separately hosted Huabu Server. */
   isRemoteServer: boolean;
   localAgent?: {

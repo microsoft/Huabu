@@ -16,10 +16,12 @@ import {
   useSortable,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Folder, House, Plus, Settings, X } from 'lucide-react';
+import { AlertTriangle, Folder, House, Plus, Settings, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
+
+import { DESKTOP_BRIDGE_PROTOCOL } from '@huabu/shared/desktop-tabs';
 
 import { getElectronBridge } from '@/hooks/useElectron';
 
@@ -240,6 +242,16 @@ export default function DesktopTabShell() {
 
   if (!tabs || !bridge) return null;
 
+  // These pages come from the Server, the bridge from the installed desktop
+  // app; either may be the older one. A desktop app without a number predates it.
+  const desktopProtocol = bridge.protocol ?? 0;
+  const versionMismatch =
+    desktopProtocol < DESKTOP_BRIDGE_PROTOCOL
+      ? t('desktopTabs.desktopOutdated')
+      : desktopProtocol > DESKTOP_BRIDGE_PROTOCOL
+        ? t('desktopTabs.serverOutdated')
+        : null;
+
   const displayedTabs = snapshot?.tabs ?? [];
   const from = pendingMove
     ? displayedTabs.findIndex((tab) => tab.id === pendingMove.id)
@@ -416,6 +428,17 @@ export default function DesktopTabShell() {
             title={feedback.message}
           >
             {feedback.message}
+          </span>
+        ) : null}
+        {versionMismatch ? (
+          <span
+            role="status"
+            data-testid="desktop-version-mismatch"
+            className="text-warning-fg ml-2 flex min-w-0 items-center gap-1 text-xs"
+            title={versionMismatch}
+          >
+            <AlertTriangle size={14} className="shrink-0" aria-hidden />
+            <span className="truncate">{versionMismatch}</span>
           </span>
         ) : null}
         <Button
