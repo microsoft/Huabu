@@ -199,7 +199,7 @@ const edgeStyleSchema = z
       .max(120)
       .optional()
       .describe(
-        'Short text rendered at the edge midpoint. Pass an empty string to clear an existing label.',
+        'Short text rendered at the edge midpoint in a pill up to 120px wide. Keep the endpoints at least the pill width + 80px apart so the line and arrowheads stay visible. Pass an empty string to clear an existing label.',
       ),
   })
   .strict()
