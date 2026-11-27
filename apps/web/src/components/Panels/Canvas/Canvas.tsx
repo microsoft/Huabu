@@ -120,6 +120,7 @@ import { StepEdgeRoutingProvider } from './edges/StepEdgeRoutingContext';
 import { EdgeStyleToolbar } from './FloatingToolbars/EdgeStyleToolbar.tsx';
 import { MultiSelectToolbar } from './FloatingToolbars/MultiSelectToolbar.tsx';
 import { StrokeSelectionToolbar } from './FloatingToolbars/StrokeSelectionToolbar.tsx';
+import { ImportPlaceholderLayer } from './ImportPlaceholderLayer.tsx';
 import { MoveSelectionPopover } from './MoveSelectionPopover.tsx';
 import { MultiSelectResizer } from './MultiSelectResizer.tsx';
 import { CanvasPresenceLayer } from './presence/CanvasPresenceLayer.tsx';
@@ -1546,6 +1547,7 @@ const CanvasContent: React.FC<CanvasProps> = ({
           >
             <FrameZoomController scopeKey={canvasId} />
             <StructuredDropOverlay />
+            <ImportPlaceholderLayer canvasId={canvasId} />
             <CanvasGestures
               wrapperRef={wrapperRef}
               rfInstanceRef={rfInstanceRef}

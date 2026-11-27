@@ -48,7 +48,7 @@ export function isPanelTarget(target: Element | null): boolean {
   return (
     Boolean(
       target?.closest(
-        `${REACT_FLOW_PANEL}, [data-multi-resize-control], [data-ink-sigil-label], [data-ink-sigil-hit-target]`,
+        `${REACT_FLOW_PANEL}, [data-multi-resize-control], [data-ink-sigil-label], [data-ink-sigil-hit-target], [data-import-placeholder="failed"]`,
       ),
     ) || isVideoControlTarget(target)
   );

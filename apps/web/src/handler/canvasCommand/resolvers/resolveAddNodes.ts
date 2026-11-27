@@ -40,7 +40,8 @@ import type {
 // ---------------------------------------------------------------------------
 // Sizing helpers
 // ---------------------------------------------------------------------------
-function computeMediaSize(
+/** Default width for the type, height from the media's aspect ratio. */
+export function computeMediaSize(
   nodeType: CanvasNodeType,
   naturalWidth: number,
   naturalHeight: number,

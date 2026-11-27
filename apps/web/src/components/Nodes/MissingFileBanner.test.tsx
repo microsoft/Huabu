@@ -35,10 +35,8 @@ describe('<MissingFileBanner>', () => {
 
     const banner = container.querySelector<HTMLElement>('.missing-file-banner');
     expect(banner?.style.containerType).toBe('size');
-    expect(
-      banner?.querySelector('.missing-file-banner__compact'),
-    ).not.toBeNull();
-    expect(banner?.querySelector('.missing-file-banner__full')).not.toBeNull();
+    expect(banner?.querySelector('.node-notice__compact')).not.toBeNull();
+    expect(banner?.querySelector('.node-notice__full')).not.toBeNull();
   });
 });
 
