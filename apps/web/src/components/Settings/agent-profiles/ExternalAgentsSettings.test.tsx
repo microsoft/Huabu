@@ -325,6 +325,55 @@ describe('ExternalAgentsSettings', () => {
     expect(onNavigationChange.mock.lastCall?.[0]).toBeNull();
   });
 
+  it('offers Reconnect in an offline device menu, leading to its command and back', async () => {
+    await renderSettings();
+    const actions = () =>
+      container?.querySelector<HTMLButtonElement>(
+        '[data-device-id="local"] button[aria-label="settings.deviceActions"]',
+      );
+    const reconnect = () =>
+      [...document.querySelectorAll('[role="menuitem"]')].find(
+        (item) => item.textContent === 'settings.localAgentReconnect',
+      ) as HTMLElement | undefined;
+    // An online device has nothing to reconnect.
+    await act(async () => actions()?.click());
+    expect(document.querySelector('[role="menu"]')).toBeTruthy();
+    expect(reconnect()).toBeUndefined();
+    await act(async () => actions()?.click());
+
+    const device = useAcpProfilesStore.getState().connectedDevices[0];
+    await act(async () =>
+      useAcpProfilesStore.setState({
+        connectedDevices: [],
+        knownDevices: [device],
+      }),
+    );
+    const row = container?.querySelector('[data-device-id="local"]');
+    expect(row?.textContent).toContain('settings.localAgentDisabled');
+    // Reconnect lives in the menu, not beside the status.
+    expect(row?.textContent).not.toContain('settings.localAgentReconnect');
+    await act(async () => actions()?.click());
+    expect(reconnect()).toBeTruthy();
+
+    await act(async () => reconnect()?.click());
+    // The usual command, introduced as one to run again on that device.
+    expect(container?.textContent).toContain('git clone');
+    expect(container?.textContent).toContain('settings.agentletCommandCopy');
+    expect(container?.textContent).toContain(
+      'settings.reconnectDeviceDescription',
+    );
+    expect(container?.textContent).not.toContain(
+      'settings.agentletHowToConnectDescription',
+    );
+    const navigation = onNavigationChange.mock.lastCall?.[0];
+    expect(navigation?.title).toBe('settings.reconnectDevice');
+
+    await act(async () => navigation.onBack());
+    expect(document.activeElement).toBe(actions());
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+    expect(container?.textContent).not.toContain('git clone');
+  });
+
   it('offers connection instructions even when no device is connected', async () => {
     await renderSettings();
     await act(async () =>

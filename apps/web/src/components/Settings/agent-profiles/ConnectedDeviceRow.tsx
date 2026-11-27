@@ -7,6 +7,7 @@ import {
   MoreHorizontal,
   Pencil,
   Plus,
+  RefreshCw,
 } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -38,6 +39,8 @@ export function ConnectedDeviceRow({
   children,
   onAdd,
   addRef,
+  onReconnect,
+  actionsRef,
   profileCount = 0,
 }: {
   device: AgentletDevice;
@@ -51,6 +54,13 @@ export function ConnectedDeviceRow({
   children?: ReactNode;
   onAdd?: () => void;
   addRef?: Ref<HTMLButtonElement>;
+  /**
+   * Adds Reconnect to the actions menu of an offline device other than this
+   * one, leading to the command to run again on that device.
+   */
+  onReconnect?: () => void;
+  /** The device's actions (…) button, where focus returns from Reconnect. */
+  actionsRef?: Ref<HTMLButtonElement>;
   profileCount?: number;
 }) {
   const { t } = useTranslation();
@@ -218,7 +228,11 @@ export function ConnectedDeviceRow({
               align="bottom-right"
               trigger={
                 <Button
-                  ref={renameRef}
+                  ref={(element: HTMLButtonElement | null) => {
+                    renameRef.current = element;
+                    if (typeof actionsRef === 'function') actionsRef(element);
+                    else if (actionsRef) actionsRef.current = element;
+                  }}
                   variant="ghost"
                   size="field"
                   iconOnly
@@ -241,6 +255,17 @@ export function ConnectedDeviceRow({
                   }}
                 >
                   {t('settings.renameDevice')}
+                </DropdownMenuItem>
+              )}
+              {!online && !isLocalDevice && onReconnect && (
+                <DropdownMenuItem
+                  icon={<RefreshCw />}
+                  onClick={() => {
+                    onMenuOpenChange?.(false);
+                    onReconnect();
+                  }}
+                >
+                  {t('settings.localAgentReconnect')}
                 </DropdownMenuItem>
               )}
               {menuItems}

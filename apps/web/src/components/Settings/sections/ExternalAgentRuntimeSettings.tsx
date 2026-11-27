@@ -27,6 +27,7 @@ import { ResetDeviceCredentials } from './ResetDeviceCredentials';
 
 import type {
   AgentletConnectionCommandResponse,
+  AgentletDevice,
   ConnectionCopyFormat,
   ConnectionShell,
   ExternalAgentRuntimeConfig,
@@ -360,7 +361,14 @@ export function ExternalAgentRuntimeSettings() {
   );
 }
 
-export function AgentConnectionSettings() {
+/**
+ * How to connect a device's Agents to Huabu. With `device`, the steps are for
+ * reconnecting that offline device: run again on it, the daemon reuses the
+ * identity saved there, so the device keeps its ID and Agent profiles.
+ */
+export function AgentConnectionSettings({
+  device,
+}: { device?: AgentletDevice } = {}) {
   const { t } = useTranslation();
   const localAccessOnly = useDeploymentReadinessStore(
     (state) => state.readiness?.bind.scope === 'loopback',
@@ -445,7 +453,13 @@ export function AgentConnectionSettings() {
 
   return (
     <div className="text-fg-default space-y-5 px-3.5 py-3 text-[13px] leading-6 [overflow-wrap:anywhere]">
-      <p>{t('settings.agentletHowToConnectDescription')}</p>
+      <p>
+        {device
+          ? t('settings.reconnectDeviceDescription', {
+              device: device.displayName,
+            })
+          : t('settings.agentletHowToConnectDescription')}
+      </p>
       <ol className="list-decimal space-y-5 pl-5 marker:font-medium">
         <li className="pl-1">
           <h4 className="font-medium">{t('settings.agentletPrepareDevice')}</h4>
