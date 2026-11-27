@@ -7,7 +7,7 @@
  *   - `fs/read_text_file`          → capabilities/fs.ts (sandboxed)
  *   - `fs/write_text_file`         → reject -32601 (read-only)
  *   - `terminal/*`                 → reject -32601 (never implemented)
- *   - `session/request_permission` → auto-allow (local-agent threat model)
+ *   - `session/request_permission` → notify caller, cancel without a notifier
  *
  * Bound to one opaque namespace scope (`opts.scopeName`, the L2
  * `namespace.name`); rebinding to another scope requires rebuilding the
@@ -189,8 +189,8 @@ type SessionUpdateHandler = (update: AcpSessionUpdate) => void;
  * to surface an agent `session/request_permission` to the user. The
  * client suspends the agent's request until {@link AcpAgentClient.resolvePermission}
  * is called with the matching `requestId`. When NO notifier is installed
- * (e.g. session warm-up, or an out-of-turn request) the client falls
- * back to the auto-allow strategy ({@link pickPermissionOption}).
+ * (e.g. session warm-up, or an out-of-turn request) the client cancels
+ * the request.
  */
 export type PermissionNotifier = (req: {
   requestId: string;
@@ -321,7 +321,7 @@ export class AcpAgentClient {
   /**
    * Per-turn permission notifiers, keyed by sessionId. Installed by
    * {@link prompt} when the caller wants to gate permission via UI;
-   * removed in the `prompt` `finally`. Absence ⇒ auto-allow.
+   * removed in the `prompt` `finally`. Absence ⇒ cancel.
    */
   private readonly permissionNotifiers = new Map<string, PermissionNotifier>();
   /**
@@ -487,7 +487,7 @@ export class AcpAgentClient {
    * When `onPermissionRequest` is supplied, agent
    * `session/request_permission` calls during this turn are surfaced to it
    * and suspended until {@link resolvePermission} answers (or a timeout /
-   * abort cancels them). Without it, permission requests auto-allow.
+   * abort cancels them). Without it, permission requests are cancelled.
    *
    * `blocks` is the driver-native per-turn content: ACP content blocks
    * (text + image + …) passed straight to `session/prompt`. The host's
@@ -977,9 +977,8 @@ export class AcpAgentClient {
    *     {@link resolvePermission} answers, a {@link PERMISSION_TIMEOUT_MS}
    *     timeout fires, or the turn aborts. The user's choice (or a
    *     cancel) is returned to the agent.
-   *  2. No notifier (session warm-up, out-of-turn request) ⇒ fall back to
-   *     auto-allow via {@link pickPermissionOption}. Sediment's ACP runtime
-   *     is local-agent only; OS file permissions are the real boundary.
+   *  2. No notifier (session warm-up, out-of-turn request) ⇒ cancel the
+   *     request rather than treating a missing approval handler as consent.
    */
   private async handleRequestPermission(
     params: RequestPermissionRequest,
@@ -1002,21 +1001,19 @@ export class AcpAgentClient {
     const toolCall = params.toolCall ?? {};
     const notifier = this.permissionNotifiers.get(params.sessionId);
 
-    // No UI gate for this turn — preserve auto-allow behaviour.
     if (!notifier) {
-      const choice = pickPermissionOption(options);
-      this.logger.info(
+      this.logger.warn(
         {
           scopeName: this.scopeName,
           toolCallId: (toolCall as { toolCallId?: unknown }).toolCallId,
           toolTitle: (toolCall as { title?: unknown }).title,
           toolKind: (toolCall as { kind?: unknown }).kind,
-          choice: { optionId: choice.optionId, kind: choice.kind },
+          sessionId: params.sessionId,
         },
-        '[acp] session/request_permission auto-decided',
+        '[acp] session/request_permission cancelled: no approval handler',
       );
       return {
-        outcome: { outcome: 'selected', optionId: choice.optionId },
+        outcome: { outcome: 'cancelled' },
       };
     }
 
