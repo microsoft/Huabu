@@ -160,7 +160,7 @@ const agentNodeDataSchema = z
   })
   .strict()
   .describe(
-    'Node data. Fields depend on nodeType: note/text/question use content; web/image/pdf/office/video use src; frame uses label.',
+    'Node data. Fields depend on nodeType: note/text/question use content; web/image/pdf/office/video/audio use src; frame uses label.',
   );
 
 const agentNodeCreateInputSchema = z
