@@ -224,12 +224,17 @@ export function withDistinctTrackKeys<
   });
 }
 
-/** Existing members keep explicit order; newcomers are inserted by their placement coordinate. */
+/**
+ * Existing members keep explicit order; newcomers are inserted by their placement coordinate.
+ * Newcomers named in `block` enter together: they share the block's leading coordinate, so
+ * established members never end up between them.
+ */
 export function orderTrack<T>(
   items: T[],
   idOf: (item: T) => string,
   positionOf: (item: T) => number,
   ranks: ReadonlyMap<string, number>,
+  block?: ReadonlySet<string>,
 ): T[] {
   const known = items
     .flatMap((item) => {
@@ -238,15 +243,29 @@ export function orderTrack<T>(
     })
     .sort((a, b) => a.rank - b.rank)
     .map(({ item }) => item);
-  const incoming = items
-    .filter((item) => !ranks.has(idOf(item)))
-    .sort((a, b) => positionOf(a) - positionOf(b));
+  const newcomers = items.filter((item) => !ranks.has(idOf(item)));
+  const blockStart = Math.min(
+    ...newcomers
+      .filter((item) => block?.has(idOf(item)))
+      .map((item) => positionOf(item)),
+  );
+  const inBlock = (item: T) => (block?.has(idOf(item)) ? 1 : 0);
+  const anchorOf = (item: T) => (inBlock(item) ? blockStart : positionOf(item));
+  // A newcomer standing exactly where the block starts goes before it, as an
+  // established member at that coordinate does; putting it by its own
+  // coordinate among the block's members would split the block.
+  const incoming = newcomers.sort(
+    (a, b) =>
+      anchorOf(a) - anchorOf(b) ||
+      inBlock(a) - inBlock(b) ||
+      positionOf(a) - positionOf(b),
+  );
   const result: T[] = [];
   let cursor = 0;
   for (const item of known) {
     while (
       cursor < incoming.length &&
-      positionOf(incoming[cursor]) < positionOf(item)
+      anchorOf(incoming[cursor]) < positionOf(item)
     ) {
       result.push(incoming[cursor++]);
     }

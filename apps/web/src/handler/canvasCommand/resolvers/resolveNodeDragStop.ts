@@ -216,8 +216,13 @@ export default function resolveNodeDragStop(
 
   let placed = applyPendingMutations(result, dropOutcome);
   const movedIds = new Set<string>(intent.draggedNodeIds);
+  // Nodes dragged together stay adjacent in a track's reading order, whether
+  // they enter a Frame or are repositioned inside it.
   for (const frameId of affectedFrameIds) {
-    placed = withMasonryLayoutOrder(placed, frameId, movedIds, ui.edges);
+    placed = withMasonryLayoutOrder(placed, frameId, movedIds, ui.edges, {
+      ids: movedIds,
+      previous: nodes,
+    });
   }
   // Resolve destination cells before reflow can replace the live insertion coordinate.
   const projection = projectAffectedFrameGeometry(
