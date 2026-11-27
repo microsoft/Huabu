@@ -291,6 +291,36 @@ function coordinates(
   );
 }
 
+// Each scanline stores one byte per adjacent segment. Mark the same interior
+// intersections as hits(), once per blocker instead of once per A* transition.
+function blockedGridSegments(
+  lines: readonly number[],
+  points: readonly number[],
+  blockers: readonly OrthogonalRect[],
+  horizontal: boolean,
+): Uint8Array {
+  const stride = points.length - 1;
+  const blocked = new Uint8Array(lines.length * stride);
+  for (const rect of blockers) {
+    const minLine = (horizontal ? rect.y : rect.x) + EPSILON;
+    const maxLine = (horizontal ? rect.y + rect.h : rect.x + rect.w) - EPSILON;
+    const minPoint = (horizontal ? rect.x : rect.y) + EPSILON;
+    const maxPoint = (horizontal ? rect.x + rect.w : rect.y + rect.h) - EPSILON;
+    let first = 0;
+    while (first < stride && points[first + 1] <= minPoint) first++;
+    let end = first;
+    while (end < stride && points[end] < maxPoint) end++;
+    if (first === end) continue;
+    for (let line = 0; line < lines.length && lines[line] < maxLine; line++) {
+      if (lines[line] > minLine) {
+        const offset = line * stride;
+        blocked.fill(1, offset + first, offset + end);
+      }
+    }
+  }
+  return blocked;
+}
+
 /**
  * Route in absolute canvas coordinates, with a hard cap on grid size and search work.
  * Endpoint rectangles are obstacles after their own outward port stubs. Other
@@ -578,7 +608,8 @@ export function routeOrthogonalEdge(
     limit,
   );
   const width = gridX.length;
-  const count = width * gridY.length;
+  const height = gridY.length;
+  const count = width * height;
   const startId = gridY.indexOf(start.y) * width + gridX.indexOf(start.x);
   const endId = gridY.indexOf(end.y) * width + gridX.indexOf(end.x);
   const pointAt = (id: number): OrthogonalPoint => ({
@@ -587,7 +618,8 @@ export function routeOrthogonalEdge(
   });
   const scores = new Float64Array(count * 4).fill(Infinity);
   const previous = new Int32Array(count * 4).fill(-1);
-  const clear = new Map<number, boolean>();
+  const horizontal = blockedGridSegments(gridY, gridX, gridBlockers, true);
+  const vertical = blockedGridSegments(gridX, gridY, gridBlockers, false);
   const queue = new SearchQueue();
   const initial = startId * 4 + DIRECTION[sourceSide];
   scores[initial] = 0;
@@ -609,21 +641,19 @@ export function routeOrthogonalEdge(
     const row = Math.floor(id / width);
     const neighbors = [
       col + 1 < width ? id + 1 : -1,
-      row + 1 < gridY.length ? id + width : -1,
+      row + 1 < height ? id + width : -1,
       col > 0 ? id - 1 : -1,
       row > 0 ? id - width : -1,
     ];
     for (let nextDirection = 0; nextDirection < 4; nextDirection++) {
       const next = neighbors[nextDirection];
       if (next < 0 || nextDirection === (direction + 2) % 4) continue;
+      const blocked =
+        nextDirection % 2 === 0
+          ? horizontal[row * (width - 1) + col - (nextDirection === 2 ? 1 : 0)]
+          : vertical[col * (height - 1) + row - (nextDirection === 3 ? 1 : 0)];
+      if (blocked) continue;
       const b = pointAt(next);
-      const key = Math.min(id, next) * count + Math.max(id, next);
-      let passable = clear.get(key);
-      if (passable === undefined) {
-        passable = !gridBlockers.some((r) => hits(a, b, r));
-        clear.set(key, passable);
-      }
-      if (!passable) continue;
       const cost =
         current.cost +
         distance(a, b) +

@@ -63,15 +63,12 @@ export function VideoPlayer({
   active,
   startPlayback = false,
   onPlaybackError,
-  placeholder = 'glyph',
 }: {
   data: Record<string, unknown>;
   canvasId: string;
   active: boolean;
   startPlayback?: boolean;
   onPlaybackError?: () => void;
-  /** The canvas supplies its own Play action; previews retain a neutral fallback. */
-  placeholder?: 'glyph' | 'empty';
 }) {
   const { t } = useTranslation();
   const src = typeof data.src === 'string' ? data.src : '';
@@ -116,12 +113,14 @@ export function VideoPlayer({
               className="h-full w-full object-contain"
             />
           ) : (
-            <div className="text-fg-subtle flex flex-col items-center gap-2 text-sm">
-              {(placeholder === 'glyph' || !src) && (
+            // A video without a cover is a plain surface; only a missing
+            // source is marked, since nothing can be played there.
+            !src && (
+              <div className="text-fg-subtle flex flex-col items-center gap-2 text-sm">
                 <Film size={48} strokeWidth={1.5} aria-hidden />
-              )}
-              {!src && <span>{t('node.noVideoSource')}</span>}
-            </div>
+                <span>{t('node.noVideoSource')}</span>
+              </div>
+            )
           )}
         </div>
       )}

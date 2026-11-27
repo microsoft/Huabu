@@ -137,12 +137,14 @@ describe('VideoNode', () => {
       mocks.presentation.mode = 'minimal';
       render({ coverUrl: undefined });
       expect(container.querySelector('button')).toBeNull();
+      // Far zoom withdraws the action and puts no other mark in its place.
+      expect(container.querySelector('svg')).toBeNull();
+      expect(container.querySelector('[data-video-player]')).not.toBeNull();
+      render({ src: '', coverUrl: undefined });
       expect(
         container.querySelector('[data-video-player] svg.lucide-film'),
       ).not.toBeNull();
       expect(container.querySelector('svg')?.getAttribute('width')).toBe('48');
-      expect(container.querySelector('svg.lucide-video')).toBeNull();
-      render({ src: '', coverUrl: undefined });
       expect(container.textContent).toContain('node.noVideoSource');
     },
   );
