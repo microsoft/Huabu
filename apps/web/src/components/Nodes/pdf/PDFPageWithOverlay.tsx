@@ -65,7 +65,7 @@ type PDFPageWithOverlayProps = {
   pageWidth?: number;
   /** When false (default), pointer events pass through and no capture overlay is shown. */
   captureEnabled?: boolean;
-  onAreaCaptured: (event: AreaCapturedEvent) => void;
+  onAreaCaptured?: (event: AreaCapturedEvent) => void;
   /** When provided, the selection rectangle stays visible (e.g. while FloatingDragHandle is shown). */
   persistedRect?: NormalizedRect;
   /** Persistent highlights to render on this page. */
@@ -260,7 +260,7 @@ export const PDFPageWithOverlay = ({
         return words.join(' ').replace(/\s+/g, ' ').trim();
       };
 
-      onAreaCaptured({
+      onAreaCaptured?.({
         pageIndex,
         captureRect,
         position: { x: e.clientX, y: e.clientY },

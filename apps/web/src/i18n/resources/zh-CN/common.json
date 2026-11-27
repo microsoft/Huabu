@@ -45,7 +45,17 @@
     "readOnlyText": "只读文件源码",
     "readMore": "继续读取",
     "changed": "文件已变化，请刷新后重新读取。",
-    "previewLimit": "已达到预览上限（256 KiB），请在所属设备上打开文件查看其余内容。"
+    "previewLimit": "已达到预览上限（256 KiB），请在所属设备上打开文件查看其余内容。",
+    "readOnlyPdf": "只读 PDF 文件",
+    "pdfLoadingProgress": "正在加载 PDF（{{loaded}} / {{total}}）…",
+    "pdfPageCount_one": "{{count}} 页",
+    "pdfPageCount_other": "{{count}} 页",
+    "pdfTooLarge": "此 PDF 超过 {{limitMiB}} MiB 预览上限，请在所属设备上打开。",
+    "pdfEncrypted": "此 PDF 受密码保护，无法在此预览；请在所属设备上打开。",
+    "pdfInvalid": "无法渲染此 PDF 文件，文件可能已损坏或不是有效的 PDF。",
+    "pdfNotFound": "在设备上未找到此 PDF 文件。",
+    "pdfPermissionDenied": "没有权限读取设备上的此 PDF 文件。",
+    "pdfProxyIncompatible": "请更新此设备上的 Agentlet 以预览 PDF 文件。"
   },
   "remoteConversation": {
     "sourceNodeMissing": "Agent 节点已不在此 Space",

@@ -12,7 +12,11 @@ import {
   getAgentProfileRegistry,
   getAgentletGateway,
 } from '@agenetes/agentlet-host';
-import { FS_MAX_RESPONSE_BYTES, supportsFsProtocol } from '@agentlet/protocol';
+import {
+  FS_MAX_RESPONSE_BYTES,
+  supportsFsBinaryRead,
+  supportsFsProtocol,
+} from '@agentlet/protocol';
 
 import { proxyFsResponseSchema } from '@huabu/shared';
 
@@ -142,7 +146,17 @@ export class DeviceFilesService {
   }
 
   /** The caller has checked that it may use `body.agentletId`. */
-  async execute(body: DeviceFilesBody): Promise<DeviceFilesResponse> {
+  async execute(
+    body: DeviceFilesBody,
+    signal?: AbortSignal,
+  ): Promise<DeviceFilesResponse> {
+    if (signal?.aborted) {
+      throw new DeviceFilesError(
+        'cancelled',
+        499,
+        'Filesystem request cancelled',
+      );
+    }
     if (
       this.disposed ||
       getAgentletGateway()?.getAgentlet(body.agentletId)?.status !== 'connected'
@@ -191,7 +205,7 @@ export class DeviceFilesService {
       );
     const current = session;
     current.pending++;
-    const task = current.tail.then(() => this.run(current, body));
+    const task = current.tail.then(() => this.run(current, body, signal));
     current.tail = task.then(
       () => undefined,
       () => undefined,
@@ -207,10 +221,22 @@ export class DeviceFilesService {
   private async run(
     session: DeviceSession,
     body: DeviceFilesBody,
+    signal?: AbortSignal,
   ): Promise<DeviceFilesResponse> {
+    if (signal?.aborted) {
+      if (!session.entry || session.entry.client.isClosed) {
+        await this.retire(session);
+      }
+      throw new DeviceFilesError(
+        'cancelled',
+        499,
+        'Filesystem request cancelled',
+      );
+    }
     this.assertCurrent(session);
     let timer: ReturnType<typeof setTimeout> | undefined;
     let timedOut = false;
+    let preserveSession = false;
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(
         () => {
@@ -294,6 +320,27 @@ export class DeviceFilesService {
         }
       }
       this.assertCurrent(session);
+      if (
+        body.operation === 'fs-read-bytes' &&
+        !supportsFsBinaryRead(
+          session.entry.client.initializeResult?.agentCapabilities,
+        )
+      ) {
+        preserveSession = true;
+        throw new DeviceFilesError(
+          'files_proxy_incompatible',
+          503,
+          'Filesystem proxy binary read capability is missing; update Agentlet to preview PDF files',
+        );
+      }
+      if (signal?.aborted) {
+        preserveSession = true;
+        throw new DeviceFilesError(
+          'cancelled',
+          499,
+          'Filesystem request cancelled',
+        );
+      }
       const entry = session.entry;
       let text = '';
       let bytes = 0;
@@ -319,7 +366,7 @@ export class DeviceFilesService {
           } else if (update.sessionUpdate !== 'available_commands_update')
             invalid = true;
         },
-        undefined,
+        signal,
         (request) => {
           entry.client.resolvePermission(request.requestId, {
             cancelled: true,
@@ -327,6 +374,14 @@ export class DeviceFilesService {
         },
       );
       this.assertCurrent(session);
+      if (!invalid && signal?.aborted && result.stopReason === 'cancelled') {
+        preserveSession = true;
+        throw new DeviceFilesError(
+          'cancelled',
+          499,
+          'Filesystem request cancelled',
+        );
+      }
       if (invalid || result.stopReason !== 'end_turn')
         throw new DeviceFilesError(
           'files_invalid_response',
@@ -352,14 +407,19 @@ export class DeviceFilesService {
         );
       const response = parsed.data;
       if (!response.ok) {
+        preserveSession = true;
         const status =
           response.error.code === 'permission_denied'
             ? 403
             : response.error.code === 'not_found'
               ? 404
-              : response.error.code === 'io_error'
-                ? 502
-                : 400;
+              : response.error.code === 'file_too_large'
+                ? 413
+                : response.error.code === 'cancelled'
+                  ? 499
+                  : response.error.code === 'io_error'
+                    ? 502
+                    : 400;
         throw new DeviceFilesError(
           response.error.code,
           status,
@@ -368,12 +428,21 @@ export class DeviceFilesService {
       }
       if (response.operation === 'fs-list')
         return { operation: response.operation, result: response.result };
+      if (response.operation === 'fs-read')
+        return { operation: response.operation, result: response.result };
       return { operation: response.operation, result: response.result };
     };
     try {
       return await Promise.race([operation(), timeout]);
     } catch (error) {
-      await this.retire(session);
+      if (
+        !preserveSession ||
+        timedOut ||
+        session.retired ||
+        session.entry?.client.isClosed
+      ) {
+        await this.retire(session);
+      }
       if (error instanceof DeviceFilesError) throw error;
       this.log.warn('Filesystem proxy request failed');
       throw new DeviceFilesError(

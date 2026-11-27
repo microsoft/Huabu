@@ -389,4 +389,166 @@ describe('private filesystem ACP service', () => {
     expect(mocks.release).toHaveBeenCalledTimes(2);
     expect(mocks.ensure).toHaveBeenCalledTimes(2);
   });
+
+  it('reads binary chunks via fs-read-bytes and maps file_too_large to HTTP 413 without retiring the session', async () => {
+    const binaryChunk = {
+      version: 1,
+      operation: 'fs-read-bytes',
+      ok: true,
+      result: {
+        path: '/work/doc.pdf',
+        encoding: 'base64',
+        data: Buffer.from('%PDF-1.7').toString('base64'),
+        byteLength: 8,
+        size: 8,
+        contentVersion: 'a'.repeat(64),
+      },
+    };
+    mocks.prompt.mockImplementationOnce(
+      async (...args: Parameters<AcpAgentClient['prompt']>) => {
+        args[2]({
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: JSON.stringify(binaryChunk) },
+        });
+        return { stopReason: 'end_turn' };
+      },
+    );
+    await expect(
+      service.execute({
+        agentletId: 'device',
+        operation: 'fs-read-bytes',
+        args: {
+          path: '/work/doc.pdf',
+          limitBytes: 262_144,
+          maxSizeBytes: 33_554_432,
+        },
+      }),
+    ).resolves.toEqual({
+      operation: 'fs-read-bytes',
+      result: binaryChunk.result,
+    });
+
+    mocks.prompt.mockImplementationOnce(
+      async (...args: Parameters<AcpAgentClient['prompt']>) => {
+        args[2]({
+          sessionUpdate: 'agent_message_chunk',
+          content: {
+            type: 'text',
+            text: JSON.stringify({
+              version: 1,
+              operation: 'fs-read-bytes',
+              ok: false,
+              error: {
+                code: 'file_too_large',
+                message: 'File exceeds the preview size limit',
+              },
+            }),
+          },
+        });
+        return { stopReason: 'end_turn' };
+      },
+    );
+    await expect(
+      service.execute({
+        agentletId: 'device',
+        operation: 'fs-read-bytes',
+        args: { path: '/work/huge.pdf', maxSizeBytes: 1024 },
+      }),
+    ).rejects.toMatchObject({ code: 'file_too_large', status: 413 });
+    expect(mocks.shutdown).not.toHaveBeenCalled();
+    expect(mocks.ensure).toHaveBeenCalledOnce();
+  });
+
+  it('rejects fs-read-bytes on legacy v1 proxies without binaryRead while keeping the v1 session alive for fs-list', async () => {
+    const baseEntry = await mocks.ensure();
+    mocks.ensure.mockClear();
+    mocks.ensure.mockResolvedValue({
+      ...baseEntry,
+      client: {
+        ...baseEntry.client,
+        initializeResult: {
+          agentCapabilities: {
+            _meta: { [FS_PROXY_CAPABILITY_KEY]: { version: 1 } },
+          },
+        },
+      },
+    });
+    await expect(service.execute(request)).resolves.toEqual({
+      operation: 'fs-list',
+      result: listing.result,
+    });
+    await expect(
+      service.execute({
+        agentletId: 'device',
+        operation: 'fs-read-bytes',
+        args: { path: '/work/doc.pdf' },
+      }),
+    ).rejects.toMatchObject({
+      code: 'files_proxy_incompatible',
+      status: 503,
+      message: expect.stringContaining('preview PDF files'),
+    });
+    expect(mocks.shutdown).not.toHaveBeenCalled();
+    expect(mocks.release).not.toHaveBeenCalled();
+    await expect(service.execute(request)).resolves.toEqual({
+      operation: 'fs-list',
+      result: listing.result,
+    });
+    expect(mocks.ensure).toHaveBeenCalledOnce();
+    expect(mocks.prompt).toHaveBeenCalledTimes(2);
+  });
+
+  it('propagates caller AbortSignal to in-flight and queued requests without retiring a healthy session', async () => {
+    await service.execute(request);
+    mocks.prompt.mockClear();
+
+    const activeAbort = new AbortController();
+    const queuedAbort = new AbortController();
+    mocks.prompt.mockImplementationOnce(
+      (...args: Parameters<AcpAgentClient['prompt']>) =>
+        new Promise((resolve) => {
+          args[3]?.addEventListener(
+            'abort',
+            () => resolve({ stopReason: 'cancelled' }),
+            { once: true },
+          );
+        }),
+    );
+
+    const inFlight = service.execute(
+      {
+        agentletId: 'device',
+        operation: 'fs-read-bytes',
+        args: { path: '/work/first.pdf' },
+      },
+      activeAbort.signal,
+    );
+    const queued = service.execute(
+      {
+        agentletId: 'device',
+        operation: 'fs-read-bytes',
+        args: { path: '/work/second.pdf' },
+      },
+      queuedAbort.signal,
+    );
+    await vi.waitFor(() => expect(mocks.prompt).toHaveBeenCalledOnce());
+    queuedAbort.abort();
+    activeAbort.abort();
+
+    await expect(inFlight).rejects.toMatchObject({
+      code: 'cancelled',
+      status: 499,
+    });
+    await expect(queued).rejects.toMatchObject({
+      code: 'cancelled',
+      status: 499,
+    });
+    expect(mocks.prompt).toHaveBeenCalledOnce();
+    expect(mocks.shutdown).not.toHaveBeenCalled();
+    await expect(service.execute(request)).resolves.toEqual({
+      operation: 'fs-list',
+      result: listing.result,
+    });
+    expect(mocks.ensure).toHaveBeenCalledOnce();
+  });
 });

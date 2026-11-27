@@ -45,7 +45,17 @@
     "readOnlyText": "Read-only file source",
     "readMore": "Read more",
     "changed": "File changed. Refresh to read it again.",
-    "previewLimit": "Preview limit reached (256 KiB). Open the file on its device for more."
+    "previewLimit": "Preview limit reached (256 KiB). Open the file on its device for more.",
+    "readOnlyPdf": "Read-only PDF file",
+    "pdfLoadingProgress": "Loading PDF ({{loaded}} / {{total}})…",
+    "pdfPageCount_one": "{{count}} page",
+    "pdfPageCount_other": "{{count}} pages",
+    "pdfTooLarge": "This PDF exceeds the {{limitMiB}} MiB preview limit. Open it on its device instead.",
+    "pdfEncrypted": "This PDF is password-protected and cannot be previewed here. Open it on its device instead.",
+    "pdfInvalid": "Could not render this PDF file. It may be corrupted or not a valid PDF.",
+    "pdfNotFound": "This PDF file was not found on the device.",
+    "pdfPermissionDenied": "Permission denied while reading this PDF file on the device.",
+    "pdfProxyIncompatible": "Update Agentlet on this device to preview PDF files."
   },
   "remoteConversation": {
     "sourceNodeMissing": "The Agent node is no longer in this Space.",

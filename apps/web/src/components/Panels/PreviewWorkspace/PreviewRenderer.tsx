@@ -142,6 +142,7 @@ export function PreviewRenderer({
   if (target.kind === 'file')
     return (
       <FileReferencePreview
+        scrollViewKey={targetKey}
         data={{
           fileReference: {
             agentletId: target.agentletId,

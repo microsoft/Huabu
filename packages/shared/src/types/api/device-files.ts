@@ -35,6 +35,19 @@ const readArgsSchema = z
     limitBytes: z.number().int().min(4).max(65_536).optional(),
   })
   .strict();
+const readBytesArgsSchema = z
+  .object({
+    path: absolutePathSchema,
+    cursor: cursorSchema.optional(),
+    limitBytes: z.number().int().min(1).max(262_144).optional(),
+    maxSizeBytes: z
+      .number()
+      .int()
+      .min(1)
+      .max(Number.MAX_SAFE_INTEGER)
+      .optional(),
+  })
+  .strict();
 export const deviceFilesBodySchema = z.discriminatedUnion('operation', [
   z
     .object({
@@ -48,6 +61,13 @@ export const deviceFilesBodySchema = z.discriminatedUnion('operation', [
       agentletId: fileReferenceSchema.shape.agentletId,
       operation: z.literal('fs-read'),
       args: readArgsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      agentletId: fileReferenceSchema.shape.agentletId,
+      operation: z.literal('fs-read-bytes'),
+      args: readBytesArgsSchema,
     })
     .strict(),
 ]);
@@ -84,12 +104,30 @@ export const fileReadResultSchema = z
   })
   .strict();
 export type FileReadResult = z.infer<typeof fileReadResultSchema>;
+export const fileBinaryReadResultSchema = z
+  .object({
+    path: absolutePathSchema,
+    encoding: z.literal('base64'),
+    data: z.string().max(349_528),
+    byteLength: z.number().int().min(0).max(262_144),
+    size: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    contentVersion: z.string().regex(/^[a-f0-9]{64}$/),
+    nextCursor: cursorSchema.optional(),
+  })
+  .strict();
+export type FileBinaryReadResult = z.infer<typeof fileBinaryReadResultSchema>;
 export const deviceFilesResponseSchema = z.discriminatedUnion('operation', [
   z
     .object({ operation: z.literal('fs-list'), result: fileListResultSchema })
     .strict(),
   z
     .object({ operation: z.literal('fs-read'), result: fileReadResultSchema })
+    .strict(),
+  z
+    .object({
+      operation: z.literal('fs-read-bytes'),
+      result: fileBinaryReadResultSchema,
+    })
     .strict(),
 ]);
 export type DeviceFilesResponse = z.infer<typeof deviceFilesResponseSchema>;
@@ -113,7 +151,15 @@ export const proxyFsResponseSchema = z.union([
   z
     .object({
       version: z.literal(1),
-      operation: z.enum(['fs-list', 'fs-read']),
+      operation: z.literal('fs-read-bytes'),
+      ok: z.literal(true),
+      result: fileBinaryReadResultSchema,
+    })
+    .strict(),
+  z
+    .object({
+      version: z.literal(1),
+      operation: z.enum(['fs-list', 'fs-read', 'fs-read-bytes']),
       ok: z.literal(false),
       error: z
         .object({
@@ -124,6 +170,7 @@ export const proxyFsResponseSchema = z.union([
             'not_directory',
             'unsupported_file',
             'unsupported_encoding',
+            'file_too_large',
             'directory_too_large',
             'stale_cursor',
             'cancelled',
