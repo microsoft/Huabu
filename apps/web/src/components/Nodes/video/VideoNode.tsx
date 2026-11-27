@@ -189,7 +189,6 @@ function InlineVideoSurface({
         active={active}
         startPlayback={active}
         onPlaybackError={playbackFailed}
-        placeholder={offerPlay ? 'empty' : 'glyph'}
       />
       {!active && offerPlay && (
         <div
