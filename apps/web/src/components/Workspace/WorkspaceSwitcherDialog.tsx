@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
 
@@ -10,19 +10,26 @@ import {
   useWorkspaceSwitch,
   useWorkspaceSwitchRoute,
 } from './useWorkspaceSwitch';
-import { CreateWorkspaceFields, WorkspaceList } from './WorkspaceList';
+import {
+  CreateWorkspaceFields,
+  isOwnWorkspace,
+  WorkspaceList,
+} from './WorkspaceList';
 import {
   useWorkspaceLabel,
   useWorkspaceStore,
 } from '../../store/workspaceStore';
 import { useWorkspaceSwitcherUiStore } from '../../store/workspaceSwitcherUiStore';
 import { Button } from '../Common/Button';
+import { cn } from '../Common/cn';
 import { Modal } from '../Common/Modal';
+import { Toggle } from '../Common/Toggle';
 
 /**
  * The Switch Workspace dialog: the full chooser for named Workspaces. It says
- * what a Workspace is, lists them all with the same rows as the quick switch,
- * and can create one. Choosing a row only marks it; Switch commits, and
+ * what a Workspace is, lists the person's Workspaces with the same rows as the
+ * quick switch, and can create one. An administrator can also show other
+ * people's Workspaces, which stay hidden until they turn that on. Choosing a row only marks it; Switch commits, and
  * Cancel or Escape leaves everything as it was. Creating (or opening a
  * folder) keeps the dialog open until the new Workspace is current, so a
  * failure leaves the typed name in place to retry. Focus stays inside while
@@ -60,7 +67,7 @@ function OpenWorkspaceSwitcherDialog() {
   const { t } = useTranslation();
   const intent = useWorkspaceSwitcherUiStore((s) => s.intent);
   const close = useWorkspaceSwitcherUiStore((s) => s.close);
-  const workspaces = useWorkspaceStore((s) => s.recentWorkspaces);
+  const everyWorkspace = useWorkspaceStore((s) => s.recentWorkspaces);
   const currentId = useWorkspaceStore((s) => s.workspaceId);
   const syncing = useWorkspaceStore((s) => s.isSyncing);
   const folders = useWorkspaceStore(
@@ -74,6 +81,38 @@ function OpenWorkspaceSwitcherDialog() {
   const nameInput = useRef<HTMLInputElement>(null);
   const firstFocus = useRef<HTMLElement | null>(null);
   const listLabel = useId();
+  const [showOthers, setShowOthers] = useState(false);
+  // Only an administrator has other people's Workspaces to show.
+  const hasOthers = everyWorkspace.some(
+    (workspace) => !isOwnWorkspace(workspace),
+  );
+  // The person's own first, so the current one is not buried among others'.
+  const own = everyWorkspace.filter(isOwnWorkspace);
+  const workspaces = showOthers
+    ? [...own, ...everyWorkspace.filter((w) => !isOwnWorkspace(w))]
+    : own;
+  // Fade an edge of the list while rows lie beyond it, so a list that ends
+  // on a whole row still reads as one that scrolls.
+  const scroller = useRef<HTMLDivElement | null>(null);
+  const [beyond, setBeyond] = useState({ above: false, below: false });
+  const measure = useCallback(() => {
+    const element = scroller.current;
+    if (!element) return;
+    const above = element.scrollTop > 1;
+    const below =
+      element.scrollTop + element.clientHeight < element.scrollHeight - 1;
+    setBeyond((last) =>
+      last.above === above && last.below === below ? last : { above, below },
+    );
+  }, []);
+  useEffect(() => {
+    measure();
+    const element = scroller.current;
+    if (!element) return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [measure, workspaces.length]);
 
   useEffect(() => {
     void refreshWorkspaces();
@@ -132,10 +171,44 @@ function OpenWorkspaceSwitcherDialog() {
       <span id={listLabel} className="sr-only">
         {t('workspace.yourWorkspaces')}
       </span>
+      {hasOthers && (
+        <div className="text-fg-muted mt-4 flex items-center justify-end gap-2 text-xs">
+          <span aria-hidden>{t('workspace.showOthers')}</span>
+          <Toggle
+            label={t('workspace.showOthers')}
+            checked={showOthers}
+            disabled={busy}
+            onChange={(next) => {
+              setShowOthers(next);
+              // A hidden row cannot stay marked for Switch.
+              if (!next && selected && !isOwnWorkspace(selected))
+                setSelectedId(currentId);
+            }}
+          />
+        </div>
+      )}
       {/* Enter on a marked row switches, like the Switch button. */}
       {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions -- Enter is a shortcut for the footer's Switch button, which stays the accessible control. */}
       <div
-        className="-mx-2 mt-4 max-h-[min(22rem,45dvh)] overflow-y-auto px-2 py-0.5"
+        ref={scroller}
+        onScroll={measure}
+        // Leaves the rest of the dialog room, so only the list scrolls; 20rem
+        // ends part-way through a row, which shows there is more.
+        // `relative` keeps the rows' visually hidden radios and notes, which
+        // are absolutely positioned, inside it; otherwise those of rows
+        // scrolled out of view stretch the dialog's own scroll area.
+        className={cn(
+          'relative -mx-2 mt-4 max-h-[min(20rem,calc(100dvh-24rem))] overflow-y-auto px-2 py-0.5',
+          beyond.above &&
+            beyond.below &&
+            '[mask-image:linear-gradient(to_bottom,transparent,black_3rem,black_calc(100%-3rem),transparent)]',
+          beyond.above &&
+            !beyond.below &&
+            '[mask-image:linear-gradient(to_bottom,transparent,black_3rem)]',
+          !beyond.above &&
+            beyond.below &&
+            '[mask-image:linear-gradient(to_bottom,black_calc(100%-3rem),transparent)]',
+        )}
         onKeyDown={(event) => {
           if (
             event.key === 'Enter' &&

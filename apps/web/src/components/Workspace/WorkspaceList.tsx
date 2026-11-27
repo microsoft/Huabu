@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { Check, Pencil, X } from 'lucide-react';
+import { Check, Info, Pencil, X } from 'lucide-react';
 import {
   forwardRef,
   useEffect,
@@ -17,6 +17,7 @@ import { Button } from '../Common/Button';
 import { cn } from '../Common/cn';
 import { TextInput } from '../Common/TextInput';
 import { toast } from '../Common/Toast';
+import { Tooltip } from '../Common/Tooltip';
 
 import type { WorkspaceDescriptor } from '../../api/workspace';
 import type { TFunction } from 'i18next';
@@ -33,21 +34,36 @@ import type { TFunction } from 'i18next';
  * first-launch page; they are known by path, not by name.
  */
 
-/** "Owner · 8 Spaces"; either part is left out when the server did not send it. */
+/**
+ * Whether the person's own lists show it by default: Workspaces of their own
+ * and those shared with them. Another person's Workspace an administrator
+ * reaches only through that role (`adminAccessOnly`) is left out, unless it
+ * is the current one, so the person still sees where they are.
+ */
+export function isOwnWorkspace(workspace: WorkspaceDescriptor): boolean {
+  return workspace.active || !workspace.adminAccessOnly;
+}
+
+/**
+ * The detail line's parts, such as `role: "Owner"` and `spaces: "8 Spaces"`;
+ * either is left out when the server did not send it.
+ */
 export function workspaceDetail(
   t: TFunction,
   workspace: Pick<WorkspaceDescriptor, 'role' | 'spaceCount'>,
-): string | null {
-  const parts: string[] = [];
-  if (workspace.role !== undefined)
-    parts.push(
-      workspace.role === null
-        ? t('workspace.sharedSpacesOnly')
-        : t(`people.role.${workspace.role}`),
-    );
-  if (workspace.spaceCount !== undefined)
-    parts.push(t('canvasList.canvasCount', { count: workspace.spaceCount }));
-  return parts.length > 0 ? parts.join(' · ') : null;
+): { role?: string; spaces?: string } {
+  return {
+    role:
+      workspace.role === undefined
+        ? undefined
+        : workspace.role === null
+          ? t('workspace.sharedSpacesOnly')
+          : t(`people.role.${workspace.role}`),
+    spaces:
+      workspace.spaceCount === undefined
+        ? undefined
+        : t('canvasList.canvasCount', { count: workspace.spaceCount }),
+  };
 }
 
 type Density = 'compact' | 'comfortable';
@@ -61,7 +77,12 @@ function WorkspaceRowFace({
   density: Density;
 }) {
   const { t } = useTranslation();
-  const detail = workspaceDetail(t, workspace);
+  const { role, spaces } = workspaceDetail(t, workspace);
+  // Another person's Workspace, reached as the administrator: the role is
+  // theirs by that office, which the (i) explains on hover.
+  const adminNote = workspace.adminAccessOnly
+    ? t('workspace.adminAccessNote')
+    : null;
   const comfortable = density === 'comfortable';
   return (
     <>
@@ -86,8 +107,32 @@ function WorkspaceRowFace({
         >
           {workspace.name}
         </span>
-        {detail && (
-          <span className="text-fg-subtle truncate text-xs">{detail}</span>
+        {(role || spaces) && (
+          <span className="text-fg-subtle flex min-w-0 items-center text-xs">
+            {role && <span className="shrink-0">{role}</span>}
+            {role && adminNote && (
+              <>
+                <Tooltip
+                  content={adminNote}
+                  // Below, so it never covers the name it explains.
+                  placement="bottom"
+                  contentClassName="max-w-64"
+                >
+                  <Info
+                    aria-hidden
+                    size={12}
+                    className="ml-1 shrink-0"
+                    data-testid="admin-access-note"
+                  />
+                </Tooltip>
+                <span className="sr-only"> ({adminNote})</span>
+              </>
+            )}
+            {role && spaces && (
+              <span className="shrink-0 whitespace-pre">{' · '}</span>
+            )}
+            {spaces && <span className="truncate">{spaces}</span>}
+          </span>
         )}
       </span>
       {workspace.active &&

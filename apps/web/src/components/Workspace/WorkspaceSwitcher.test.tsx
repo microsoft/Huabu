@@ -370,6 +370,90 @@ describe('quick switch popover', () => {
     expect(buttonNamed('workspace.allWorkspaces')).toBeTruthy();
   });
 
+  describe("another person's Workspace an administrator reaches", () => {
+    beforeEach(() => {
+      server.workspaces.push({
+        workspaceId: 'dave',
+        name: "Dave's Workspace",
+        path: null,
+        canManage: true,
+        role: 'owner',
+        adminAccessOnly: true,
+        spaceCount: 2,
+      });
+    });
+    const rowNames = () =>
+      [...dialog()!.querySelectorAll('[role="listitem"]')].map(
+        (row) => row.textContent,
+      );
+
+    const dave = () =>
+      document.querySelector('input[type="radio"][value="dave"]');
+    const showOthers = () =>
+      document.querySelector<HTMLButtonElement>(
+        'button[role="switch"][aria-label="workspace.showOthers"]',
+      );
+
+    it('stays out of the quick switch, and out of All Workspaces until asked for', async () => {
+      // Listed first by the server, to show the dialog puts it after the
+      // person's own.
+      server.workspaces.unshift(server.workspaces.pop()!);
+      await mount();
+      await click(trigger());
+      expect(rowNames()).toEqual([
+        expect.stringContaining('Default'),
+        expect.stringContaining('Research lab'),
+      ]);
+      await click(buttonNamed('workspace.allWorkspaces'));
+      expect(dave()).toBeNull();
+      expect(showOthers()?.getAttribute('aria-checked')).toBe('false');
+
+      await click(showOthers()!);
+      expect(dave()).not.toBeNull();
+      // The person's own come first, others' after them.
+      const order = [
+        ...document.querySelectorAll<HTMLInputElement>('input[type="radio"]'),
+      ].map((radio) => radio.value);
+      expect(order.at(-1)).toBe('dave');
+      // Its role says it comes from the administrator's office; others' don't.
+      const noted = [
+        ...document.querySelectorAll('[data-testid="admin-access-note"]'),
+      ].map((icon) => icon.closest('label, li, [role="listitem"]'));
+      expect(noted).toHaveLength(1);
+      expect(noted[0]?.textContent).toContain("Dave's Workspace");
+      expect(noted[0]?.textContent).toContain(
+        'people.role.owner (workspace.adminAccessNote) · ',
+      );
+      // Marked, then hidden again: Switch has nothing hidden to act on.
+      await click(dave() as HTMLElement);
+      expect(buttonNamed(/workspace.switchTo/)).toBeTruthy();
+      await click(showOthers()!);
+      expect(dave()).toBeNull();
+      expect(
+        document.querySelector<HTMLInputElement>('input[type="radio"]:checked')
+          ?.value,
+      ).toBe('default');
+    });
+
+    it('stays in the quick switch while it is the current one', async () => {
+      server.current = 'dave';
+      await mount();
+      await click(trigger());
+      expect(rowNames()).toEqual([
+        expect.stringContaining('Default'),
+        expect.stringContaining('Research lab'),
+        expect.stringContaining("Dave's Workspace"),
+      ]);
+    });
+  });
+
+  it("offers no switch for other people's Workspaces when there are none", async () => {
+    await mount();
+    await click(trigger());
+    await click(buttonNamed('workspace.allWorkspaces'));
+    expect(document.querySelector('button[role="switch"]')).toBeNull();
+  });
+
   it('cancels with Escape or a click outside, changing nothing', async () => {
     await mount();
     await click(trigger());

@@ -13,7 +13,7 @@ import { useTranslation } from 'react-i18next';
 
 import { useOpenWorkspaceSwitcher } from './useOpenWorkspaceSwitcher';
 import { useWorkspaceSwitch } from './useWorkspaceSwitch';
-import { WorkspaceList } from './WorkspaceList';
+import { isOwnWorkspace, WorkspaceList } from './WorkspaceList';
 import { useWorkspaceStore } from '../../store/workspaceStore';
 import { Button } from '../Common/Button';
 import { Modal } from '../Common/Modal';
@@ -63,7 +63,9 @@ export function WorkspaceSwitcherPopover({
   const { t } = useTranslation();
   const phone = usePhoneWidth();
   const titleId = useId();
-  const workspaces = useWorkspaceStore((s) => s.recentWorkspaces);
+  const recent = useWorkspaceStore((s) => s.recentWorkspaces);
+  // Others an administrator may open are listed in All Workspaces on request.
+  const workspaces = recent.filter(isOwnWorkspace);
   const syncing = useWorkspaceStore((s) => s.isSyncing);
   const refreshWorkspaces = useWorkspaceStore((s) => s.refreshWorkspaces);
   const openSwitcher = useOpenWorkspaceSwitcher();

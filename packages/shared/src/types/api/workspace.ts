@@ -90,6 +90,18 @@ export const workspaceDescriptorSchema = z.object({
    */
   role: workspaceRoleSchema.nullable().optional(),
   /**
+   * True when this is another person's Workspace that the caller reaches only
+   * as the deployment's administrator: someone else holds a role in it, and
+   * the caller holds no role there and no Space shared with them in it. Its
+   * `role` is still `owner`, since an administrator may manage it. Clients keep
+   * such Workspaces out of the quick switch, which lists only the caller's own
+   * and those shared with them.
+   *
+   * Sent by the list and get routes in Bubble mode. Absent for a local caller
+   * and from older servers; read it as false then.
+   */
+  adminAccessOnly: z.boolean().optional(),
+  /**
    * How many Spaces the caller may open in this Workspace: every Space,
    * nested ones included and the hidden World excluded, that
    * `GET /api/canvas` would list there.
