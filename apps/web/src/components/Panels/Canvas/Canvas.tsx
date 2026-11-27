@@ -97,6 +97,7 @@ import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
 import { isVisibleWorldNode } from '@/utils/spaceHierarchy';
 
 import { applyNodeGeometryPreviews } from './applyNodeGeometryPreview';
+import { UnseenEdgeTags } from './attention/UnseenEdgeTags.tsx';
 import { UnseenNodeMarks } from './attention/UnseenNodeMarks.tsx';
 import { CanvasGrid } from './CanvasGrid';
 import {
@@ -1610,6 +1611,7 @@ const CanvasContent: React.FC<CanvasProps> = ({
             <SelectionOutlines />
             <CanvasPresenceLayer />
             <UnseenNodeMarks />
+            <UnseenEdgeTags />
             {!isBoxSelecting && !hasLassoSelection && <MultiSelectToolbar />}
             {!isBoxSelecting && <StrokeSelectionRegion />}
             {!isBoxSelecting && <StrokeSelectionToolbar />}

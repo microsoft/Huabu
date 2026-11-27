@@ -24,6 +24,7 @@ import {
   associateAgentNodeBodySchema,
   associateAgentNodeParamsSchema,
   putNodeContentBodySchema,
+  markSeenChangesBodySchema,
   querySpaceChangesBodySchema,
   stripLegacyPortalTopology,
   recentCanvasConversationParamsSchema,
@@ -65,6 +66,11 @@ import {
   isRevisionCheckedRequest,
   resolveNodeContentUpdate,
 } from './node-content-update.js';
+import {
+  markSeenChanges,
+  pruneSeenChanges,
+  readSeenChanges,
+} from './seen-changes.js';
 import { registerSpaceCardRoutes } from './space-card.route.js';
 import {
   deletionPreview,
@@ -138,6 +144,7 @@ import type {
   GetSpacePreviewSceneResponse,
   GetThreadChangesResponse,
   QuerySpaceChangesResponse,
+  SeenChangesResponse,
   ImportCanvasResponse,
   ListCanvasesResponse,
   PostCanvasEventsRequest,
@@ -1504,13 +1511,60 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         return reply.code(404).send({ message: 'Canvas not found' });
       }
       const threads: QuerySpaceChangesResponse['threads'] = {};
+      // Which nodes still have a record in each thread read: what the
+      // caller's seen record is pruned against.
+      const live = new Map<string, Set<string>>();
       await Promise.all(
         [...new Set(parsed.data.threadIds)].map(async (threadId) => {
           const changes = await handle.changes.read(threadId);
           if (changes.length > 0) threads[threadId] = changes;
+          live.set(
+            threadId,
+            new Set(changes.flatMap((change) => change.nodeId ?? [])),
+          );
         }),
       );
-      return reply.send({ threads });
+      const seen = await pruneSeenChanges(request.params.canvasId, live);
+      return reply.send({ threads, seen });
+    },
+  );
+
+  // What the caller has seen of the Space's changes. Seeing is personal, so
+  // both routes need only read access: recording it changes nothing anyone
+  // else reads.
+  fastify.get<{
+    Params: { canvasId: string };
+    Reply: ApiResult<SeenChangesResponse>;
+  }>('/:canvasId/changes/seen', async function (request, reply) {
+    const { canvasId } = request.params;
+    if (!(await getStructuredStore().space(canvasId).read())) {
+      return reply.code(404).send({ message: 'Canvas not found' });
+    }
+    return reply.send({ seen: await readSeenChanges(canvasId) });
+  });
+
+  fastify.post<{
+    Params: { canvasId: string };
+    Reply: ApiResult<SeenChangesResponse>;
+  }>(
+    '/:canvasId/changes/seen',
+    { config: { spaceAccess: 'read' } },
+    async function (request, reply) {
+      const { canvasId } = request.params;
+      const parsed = markSeenChangesBodySchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ message: parsed.error.message });
+      }
+      if (!(await getStructuredStore().space(canvasId).read())) {
+        return reply.code(404).send({ message: 'Canvas not found' });
+      }
+      const seen = await markSeenChanges(canvasId, parsed.data.seen);
+      // The same person's other devices, and their other pages, follow.
+      publishCanvasUpdate(canvasId, {
+        type: 'invalidate',
+        data: { seenChanged: true },
+      });
+      return reply.send({ seen });
     },
   );
 

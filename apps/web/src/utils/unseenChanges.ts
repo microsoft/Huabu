@@ -7,6 +7,7 @@
  * ones the change card lists; nothing else is recorded for the marks.
  */
 
+import type { SeenChanges } from '@huabu/shared';
 import type { CanvasChangeRecord } from '@huabu/shared/canvas-engine';
 
 /** What one conversation's Agent did to a node. */
@@ -14,8 +15,11 @@ export interface UnseenSource {
   threadId: string;
   /** `create` when the Agent made the node, `update` when it changed it. */
   kind: 'create' | 'update';
-  /** The {@link seenKey}s that mark this conversation's part seen. */
-  keys: string[];
+  /**
+   * The state of this conversation's review of the node. Recorded as seen,
+   * it stays so until the conversation changes the node again.
+   */
+  key: string;
 }
 
 /** A node's mark: every conversation whose unseen change touches it. */
@@ -43,28 +47,38 @@ function marks(record: CanvasChangeRecord): record is CanvasChangeRecord & {
   return record.kind === 'update' && (record.fingerprintKeys?.length ?? 0) > 0;
 }
 
-/** The unseen mark of each node, by node id. */
+/**
+ * The unseen mark of each node, by node id.
+ *
+ * @param seen What the person has seen: conversation → node → the state of
+ *   that conversation's review of the node when they saw it.
+ */
 export function unseenMarks(
   byThread: Readonly<Record<string, readonly CanvasChangeRecord[]>>,
-  seen: Readonly<Record<string, readonly string[]>>,
+  seen: SeenChanges,
 ): Map<string, UnseenMark> {
   const result = new Map<string, UnseenMark>();
   for (const [threadId, records] of Object.entries(byThread)) {
-    const seenHere = seen[threadId] ?? [];
+    // One state per node: a conversation usually holds one record for a node,
+    // and when it holds more, all of them make up what there is to see.
+    const nodes = new Map<
+      string,
+      { kind: 'create' | 'update'; keys: string[] }
+    >();
     for (const record of records) {
       if (!marks(record)) continue;
-      const key = seenKey(record);
-      if (seenHere.includes(key)) continue;
-      const mark = result.get(record.nodeId) ?? { sources: [] };
-      result.set(record.nodeId, mark);
-      const source = mark.sources.find((entry) => entry.threadId === threadId);
-      if (!source)
-        mark.sources.push({ threadId, kind: record.kind, keys: [key] });
-      else {
-        source.keys.push(key);
-        // A node the conversation made stays `create` however it changed it.
-        if (record.kind === 'create') source.kind = 'create';
-      }
+      const node = nodes.get(record.nodeId) ?? { kind: record.kind, keys: [] };
+      nodes.set(record.nodeId, node);
+      node.keys.push(seenKey(record));
+      // A node the conversation made stays `create` however it changed it.
+      if (record.kind === 'create') node.kind = 'create';
+    }
+    for (const [nodeId, { kind, keys }] of nodes) {
+      const key = keys.sort().join('|');
+      if (seen[threadId]?.[nodeId] === key) continue;
+      const mark = result.get(nodeId) ?? { sources: [] };
+      result.set(nodeId, mark);
+      mark.sources.push({ threadId, kind, key });
     }
   }
   return result;
@@ -73,11 +87,4 @@ export function unseenMarks(
 /** Whether a mark holds a change of the given conversation. */
 export function markTouches(mark: UnseenMark, threadId: string): boolean {
   return mark.sources.some((source) => source.threadId === threadId);
-}
-
-/** Every key a thread's records could be seen under, marked or not. */
-export function threadSeenKeys(
-  records: readonly CanvasChangeRecord[] | undefined,
-): string[] {
-  return (records ?? []).filter(marks).map(seenKey);
 }

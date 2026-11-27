@@ -3,12 +3,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import {
-  markTouches,
-  seenKey,
-  threadSeenKeys,
-  unseenMarks,
-} from './unseenChanges';
+import { markTouches, seenKey, unseenMarks } from './unseenChanges';
 
 import type { CanvasChangeRecord } from '@huabu/shared/canvas-engine';
 
@@ -44,14 +39,14 @@ describe('unseenMarks', () => {
     );
     expect([...marks.keys()]).toEqual(['n1', 'n2']);
     expect(marks.get('n1')).toEqual({
-      sources: [{ threadId: 't1', kind: 'create', keys: ['change-1@f1'] }],
+      sources: [{ threadId: 't1', kind: 'create', key: 'change-1@f1' }],
     });
     expect(marks.get('n2')?.sources[0]?.kind).toBe('update');
   });
 
   it('leaves out what was seen, until the node is changed again', () => {
     const first = record({});
-    const seen = { t1: [seenKey(first)] };
+    const seen = { t1: { n1: seenKey(first) } };
     expect(unseenMarks({ t1: [first] }, seen).size).toBe(0);
     // The record keeps its id when a later change is folded into it.
     const again = record({ appliedFingerprint: 'f2' });
@@ -68,24 +63,35 @@ describe('unseenMarks', () => {
     const mark = unseenMarks(byThread, {}).get('n1');
     expect(mark).toEqual({
       sources: [
-        { threadId: 't1', kind: 'update', keys: ['c1@f1'] },
-        { threadId: 't2', kind: 'create', keys: ['c2@f1'] },
+        { threadId: 't1', kind: 'update', key: 'c1@f1' },
+        { threadId: 't2', kind: 'create', key: 'c2@f1' },
       ],
     });
     expect(mark && markTouches(mark, 't2')).toBe(true);
     expect(mark && markTouches(mark, 't3')).toBe(false);
     // Seeing one conversation's part leaves the other's.
-    expect(unseenMarks(byThread, { t1: ['c1@f1'] }).get('n1')?.sources).toEqual(
-      [{ threadId: 't2', kind: 'create', keys: ['c2@f1'] }],
-    );
-  });
-});
-
-describe('threadSeenKeys', () => {
-  it('names the keys of the records that can be marked', () => {
     expect(
-      threadSeenKeys([record({}), record({ id: 'c4', kind: 'delete' })]),
-    ).toEqual(['change-1@f1']);
-    expect(threadSeenKeys(undefined)).toEqual([]);
+      unseenMarks(byThread, { t1: { n1: 'c1@f1' } }).get('n1')?.sources,
+    ).toEqual([{ threadId: 't2', kind: 'create', key: 'c2@f1' }]);
+  });
+
+  it('judges a node a conversation holds several records for as one state', () => {
+    const records = [
+      record({ id: 'c1' }),
+      record({ id: 'c2', kind: 'update', appliedFingerprint: 'f2' }),
+    ];
+    const mark = unseenMarks({ t1: records }, {}).get('n1');
+    expect(mark?.sources).toEqual([
+      { threadId: 't1', kind: 'create', key: 'c1@f1|c2@f2' },
+    ]);
+    // Seen as a whole, and unseen again when any of them moves on.
+    const seen = { t1: { n1: 'c1@f1|c2@f2' } };
+    expect(unseenMarks({ t1: records }, seen).size).toBe(0);
+    expect(
+      unseenMarks(
+        { t1: [records[0]!, record({ id: 'c2', appliedFingerprint: 'f3' })] },
+        seen,
+      ).size,
+    ).toBe(1);
   });
 });

@@ -117,6 +117,8 @@ export const routes = {
     `/canvas/${enc(canvasId)}/presence/leave`,
   canvasChangesQuery: (canvasId: string) =>
     `/canvas/${enc(canvasId)}/changes/query`,
+  canvasChangesSeen: (canvasId: string) =>
+    `/canvas/${enc(canvasId)}/changes/seen`,
   canvasThreadChanges: (canvasId: string, threadId: string) =>
     `/canvas/${enc(canvasId)}/threads/${enc(threadId)}/changes`,
   canvasThreadChange: (canvasId: string, threadId: string, changeId: string) =>

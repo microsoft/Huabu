@@ -18,7 +18,12 @@ export const ATTENTION_COLOR: Record<AttentionKind, string> = {
   approval: 'var(--warning)',
 };
 
-const RANK: Record<AttentionKind, number> = { done: 1, error: 2, approval: 3 };
+/** How pressing each kind is: what needs the person outranks what reports. */
+export const ATTENTION_RANK: Record<AttentionKind, number> = {
+  done: 1,
+  error: 2,
+  approval: 3,
+};
 
 /** The kind that matters most among several, or null when there is none. */
 export function mostPressing(
@@ -26,7 +31,7 @@ export function mostPressing(
 ): AttentionKind | null {
   let found: AttentionKind | null = null;
   for (const kind of kinds)
-    if (!found || RANK[kind] > RANK[found]) found = kind;
+    if (!found || ATTENTION_RANK[kind] > ATTENTION_RANK[found]) found = kind;
   return found;
 }
 

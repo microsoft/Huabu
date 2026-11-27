@@ -14,9 +14,15 @@ import { readUnseenMarks, useTrackUnseenChanges } from './useUnseenChanges';
 
 import type { CanvasChangeRecord } from '@huabu/shared/canvas-engine';
 
-const mocks = vi.hoisted(() => ({ query: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  query: vi.fn(),
+  read: vi.fn(),
+  mark: vi.fn(),
+}));
 vi.mock('@/api/threadChanges', () => ({
   querySpaceChanges: mocks.query,
+  getSeenChanges: mocks.read,
+  markSeenChanges: mocks.mark,
   getThreadChanges: vi.fn(),
   acceptThreadChange: vi.fn(),
   revertThreadChange: vi.fn(),
@@ -62,8 +68,24 @@ const streamT1 = (isStreaming: boolean) =>
 
 beforeEach(() => {
   vi.useFakeTimers();
-  mocks.query.mockReset().mockResolvedValue({});
-  useSeenChangesStore.setState({ seen: {} });
+  mocks.query.mockReset().mockResolvedValue({ threads: {}, seen: {} });
+  mocks.read.mockReset().mockResolvedValue({});
+  // The server answers a mark with everything seen; here, what was sent.
+  mocks.mark
+    .mockReset()
+    .mockImplementation(
+      async (
+        _canvasId: string,
+        cells: { threadId: string; nodeId: string; key: string }[],
+      ) =>
+        Object.fromEntries(
+          cells.map(({ threadId, nodeId, key }) => [
+            threadId,
+            { [nodeId]: key },
+          ]),
+        ),
+    );
+  useSeenChangesStore.getState().reset();
   useChatStore.setState({ threadsById: {} });
   useCanvasStore.setState({
     canvasId: 'c1',
@@ -90,6 +112,10 @@ describe('useTrackUnseenChanges', () => {
     await select();
     await settle();
     expect([...readUnseenMarks().keys()]).toEqual(['n2']);
+    // Recorded on the server, so the person's other devices follow.
+    expect(mocks.mark).toHaveBeenCalledExactlyOnceWith('c1', [
+      { threadId: 't1', nodeId: 'n1', key: 'c1@f1' },
+    ]);
   });
 
   it('does not count a node that was one of several selected', async () => {
@@ -112,7 +138,10 @@ describe('useTrackUnseenChanges', () => {
 
   it('asks again, after a wait, for changes it could not read', async () => {
     mocks.query.mockReset().mockRejectedValueOnce(new Error('offline'));
-    mocks.query.mockResolvedValue({ t9: [record('c9', 'n1')] });
+    mocks.query.mockResolvedValue({
+      threads: { t9: [record('c9', 'n1')] },
+      seen: {},
+    });
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     useAcpThreadChangesStore.setState({ byThread: {} });
     useCanvasStore.setState({
@@ -133,7 +162,7 @@ describe('useTrackUnseenChanges', () => {
       .mockReset()
       .mockRejectedValueOnce(new Error('offline'))
       .mockRejectedValueOnce(new Error('offline'))
-      .mockResolvedValue({});
+      .mockResolvedValue({ threads: {}, seen: {} });
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     const question = (id: string, threadId: string) =>
       node(id, false, { type: 'question', threadId });
@@ -152,6 +181,18 @@ describe('useTrackUnseenChanges', () => {
     await act(async () => vi.advanceTimersByTime(2_000));
     expect(mocks.query).toHaveBeenLastCalledWith('c1', ['t8', 't9']);
     log.mockRestore();
+  });
+
+  it('follows what the person saw on another device', async () => {
+    mocks.read.mockResolvedValue({ t1: { n1: 'c1@f1' } });
+    await act(async () => root.render(<Tracker />));
+    await settle();
+    // Read when the Space opened: n1 was seen elsewhere.
+    expect([...readUnseenMarks().keys()]).toEqual(['n2']);
+    // And again when the server says the record changed.
+    mocks.read.mockResolvedValue({ t1: { n1: 'c1@f1', n2: 'c2@f1' } });
+    await act(async () => useSeenChangesStore.getState().refresh('c1'));
+    expect(readUnseenMarks().size).toBe(0);
   });
 
   it('asks once for the changes of the Space’s conversations', async () => {

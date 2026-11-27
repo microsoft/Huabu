@@ -72,7 +72,15 @@
   "unseenChanges": {
     "create": "{{conversation}} · created",
     "update": "{{conversation}} · changed",
-    "open": "Click to open the conversation"
+    "open": "Click to open the conversation",
+    "untitled": "Untitled",
+    "kind": {
+      "create": "created",
+      "update": "changed"
+    },
+    "others": "and {{count}} more",
+    "go": "Click to go there",
+    "dismiss": "Right-click: mark as seen"
   },
   "turnNotices": {
     "done": "Finished",
@@ -475,6 +483,8 @@
     "notifyTurnDoneDescription": "Show a system notification when a turn ends in a Space you are not looking at.",
     "notifyNeedsYou": "Notify when an Agent needs you",
     "notifyNeedsYouDescription": "Show a system notification when an Agent fails or waits for your approval in a Space you are not looking at.",
+    "showEdgeTags": "Point at unseen content from the canvas edge",
+    "showEdgeTagsDescription": "When content an Agent changed or a conversation with news is out of view, show a small numbered dot at the edge of the canvas that leads to it.",
     "turnNoticesBlocked": "The browser does not allow notifications from this page. Allow them in the browser settings first.",
     "worldCanvas": "World Canvas",
     "worldCanvasDescription": "Use World as the workspace landing page and show Space shortcuts.",

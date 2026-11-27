@@ -72,7 +72,15 @@
   "unseenChanges": {
     "create": "{{conversation}} · 新建",
     "update": "{{conversation}} · 改过",
-    "open": "点击查看对话"
+    "open": "点击查看对话",
+    "untitled": "未命名",
+    "kind": {
+      "create": "新建",
+      "update": "改过"
+    },
+    "others": "还有 {{count}} 条",
+    "go": "点击前往",
+    "dismiss": "右键：标为已看"
   },
   "turnNotices": {
     "done": "做完了",
@@ -475,6 +483,8 @@
     "notifyTurnDoneDescription": "一轮对话在你没有看着的 Space 里结束时，发一条系统通知。",
     "notifyNeedsYou": "Agent 需要你时通知",
     "notifyNeedsYouDescription": "Agent 在你没有看着的 Space 里出错或等你批准时，发一条系统通知。",
+    "showEdgeTags": "在画布边缘指出没看过的内容",
+    "showEdgeTagsDescription": "Agent 改过而你还没看的内容、有新消息的对话不在视野里时，在画布边缘显示一个带数字的小圆点，点一下过去。",
     "turnNoticesBlocked": "浏览器不允许这个页面发通知，请先在浏览器设置里允许。",
     "worldCanvas": "World Canvas",
     "worldCanvasDescription": "将 World 作为工作区入口，并显示 Space 快捷入口。",

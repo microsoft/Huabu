@@ -8,6 +8,9 @@ import type {
   DeleteThreadChangeResponse,
   GetThreadChangesResponse,
   QuerySpaceChangesResponse,
+  SeenChange,
+  SeenChanges,
+  SeenChangesResponse,
 } from '@huabu/shared';
 import type { CanvasChangeRecord } from '@huabu/shared/canvas-engine';
 
@@ -22,16 +25,38 @@ export async function getThreadChanges(
   return res.changes;
 }
 
-/** Load the pending change-review records of several threads at once. */
+/**
+ * Load the pending change-review records of several threads at once, with
+ * what the person has seen of them.
+ */
 export async function querySpaceChanges(
   canvasId: string,
   threadIds: readonly string[],
-): Promise<QuerySpaceChangesResponse['threads']> {
-  const res = await apiFetch<QuerySpaceChangesResponse>(
+): Promise<QuerySpaceChangesResponse> {
+  return apiFetch<QuerySpaceChangesResponse>(
     routes.canvasChangesQuery(canvasId),
     { method: 'POST', json: { threadIds } },
   );
-  return res.threads;
+}
+
+/** Everything the person has seen of the Space's changes. */
+export async function getSeenChanges(canvasId: string): Promise<SeenChanges> {
+  const res = await apiFetch<SeenChangesResponse>(
+    routes.canvasChangesSeen(canvasId),
+  );
+  return res.seen;
+}
+
+/** Record cells as seen by the person; resolves to all they have seen. */
+export async function markSeenChanges(
+  canvasId: string,
+  seen: readonly SeenChange[],
+): Promise<SeenChanges> {
+  const res = await apiFetch<SeenChangesResponse>(
+    routes.canvasChangesSeen(canvasId),
+    { method: 'POST', json: { seen } },
+  );
+  return res.seen;
 }
 
 /** Accept (discard) a single change record. */

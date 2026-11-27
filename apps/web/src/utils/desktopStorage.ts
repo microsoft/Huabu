@@ -13,6 +13,7 @@ const preferenceKeys = [
   'huabu.minimapEnabled',
   'huabu.notifyTurnDone',
   'huabu.notifyNeedsYou',
+  'huabu.showEdgeTags',
 ];
 
 function isPreferenceKey(key: string): key is DesktopPreferenceKey {

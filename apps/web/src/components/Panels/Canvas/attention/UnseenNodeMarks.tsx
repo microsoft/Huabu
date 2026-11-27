@@ -11,7 +11,7 @@ import { cn } from '@/components/Common/cn';
 import { toast } from '@/components/Common/Toast';
 import { Tooltip } from '@/components/Common/Tooltip';
 import {
-  markSeen,
+  markNodesSeen,
   useTrackUnseenChanges,
   useUnseenMarks,
 } from '@/hooks/useUnseenChanges';
@@ -173,7 +173,7 @@ const Mark = memo(function Mark({
             )
               return;
             // Going to see what was done is seeing it.
-            markSeen(mark);
+            markNodesSeen([nodeId]);
             void openConversationThread(canvasId, first.threadId).catch(
               (error: unknown) => {
                 console.error(
