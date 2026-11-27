@@ -34,6 +34,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 
 import type { LocalAgentState } from './local-agent.js';
 import type {
+  DESKTOP_BRIDGE_PROTOCOL as SharedBridgeProtocol,
   DesktopTabNavigation,
   DesktopTabNotice,
   DesktopTabReport,
@@ -47,6 +48,12 @@ import type {
  * `TITLE_BAR_HEIGHT` in `./title-bar.ts` — see header comment.
  */
 const TITLE_BAR_HEIGHT = 36;
+/**
+ * The bridge protocol this desktop app speaks. A sandboxed preload cannot
+ * import the shared constant, so the number is written again here; its type
+ * is the shared constant's, so a different number does not compile.
+ */
+const DESKTOP_BRIDGE_PROTOCOL: typeof SharedBridgeProtocol = 1;
 const isRemoteServer = process.argv.includes('--huabu-remote-server');
 const readArgument = (name: string): string =>
   decodeURIComponent(
@@ -138,6 +145,8 @@ const tabs: DesktopTabsApi | undefined =
 
 contextBridge.exposeInMainWorld('electronBridge', {
   ...(tabs ? { tabs } : {}),
+  /** Lets the web app tell a desktop app older or newer than itself. */
+  protocol: DESKTOP_BRIDGE_PROTOCOL,
   versions: {
     node: process.versions.node,
     chrome: process.versions.chrome,

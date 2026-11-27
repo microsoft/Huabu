@@ -62,7 +62,9 @@
     "newTab": "New tab",
     "noMatchingSpaces": "No matching Spaces.",
     "closeTab": "Close Tab",
-    "unseen": "Conversations with something you have not seen: {{count}}"
+    "unseen": "Conversations with something you have not seen: {{count}}",
+    "desktopOutdated": "This desktop app is older than the Server. Some features may not work; update the desktop app.",
+    "serverOutdated": "The Server is older than this desktop app. Some features may not work; update the Server."
   },
   "attention": {
     "done": "Finished, not seen yet",

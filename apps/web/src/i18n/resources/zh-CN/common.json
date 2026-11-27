@@ -62,7 +62,9 @@
     "newTab": "新标签页",
     "noMatchingSpaces": "没有匹配的 Space。",
     "closeTab": "关闭标签页",
-    "unseen": "{{count}} 个对话有你没看的内容"
+    "unseen": "{{count}} 个对话有你没看的内容",
+    "desktopOutdated": "桌面端版本比服务器旧，部分功能可能异常，请更新桌面端。",
+    "serverOutdated": "服务器版本比桌面端旧，部分功能可能异常，请更新服务器。"
   },
   "attention": {
     "done": "做完了，还没看",

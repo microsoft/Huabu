@@ -5,9 +5,13 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import {
+  DESKTOP_BRIDGE_PROTOCOL,
+  type DesktopTabsSnapshot,
+} from '@huabu/shared/desktop-tabs';
+
 import DesktopTabShell from './DesktopTabShell';
 
-import type { DesktopTabsSnapshot } from '@huabu/shared/desktop-tabs';
 
 const mocks = vi.hoisted(() => ({
   getState: vi.fn(),
@@ -17,13 +21,21 @@ const mocks = vi.hoisted(() => ({
   open: vi.fn(),
   command: vi.fn(),
   onHomeMenu: vi.fn(),
+  protocol: vi.fn<() => number | undefined>(),
 }));
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
 vi.mock('@/hooks/useElectron', () => {
-  const bridge = { platform: 'darwin', titleBarHeight: 36, tabs: mocks };
+  const bridge = {
+    platform: 'darwin',
+    titleBarHeight: 36,
+    tabs: mocks,
+    get protocol() {
+      return mocks.protocol();
+    },
+  };
   return { getElectronBridge: () => bridge };
 });
 vi.mock('./UpdateButton', () => ({ UpdateButton: () => null }));
@@ -74,6 +86,7 @@ describe('DesktopTabShell minimal Tab presentation', () => {
     mocks.open.mockResolvedValue({ ok: true });
     mocks.command.mockResolvedValue({ ok: true });
     mocks.onHomeMenu.mockReturnValue(vi.fn());
+    mocks.protocol.mockReturnValue(DESKTOP_BRIDGE_PROTOCOL);
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -645,5 +658,25 @@ describe('DesktopTabShell minimal Tab presentation', () => {
       'Disk full',
     );
     expect(button('Space A').querySelector('.text-danger')).toBeNull();
+  });
+
+  it('says nothing about versions when the desktop app and the Server agree', async () => {
+    await render();
+    expect(
+      container.querySelector('[data-testid="desktop-version-mismatch"]'),
+    ).toBeNull();
+  });
+
+  it.each([
+    ['a desktop app that predates the number', undefined, 'desktopOutdated'],
+    ['an older desktop app', DESKTOP_BRIDGE_PROTOCOL - 1, 'desktopOutdated'],
+    ['an older Server', DESKTOP_BRIDGE_PROTOCOL + 1, 'serverOutdated'],
+  ])('tells which side to update for %s', async (_case, protocol, key) => {
+    mocks.protocol.mockReturnValue(protocol);
+    await render();
+    expect(
+      container.querySelector('[data-testid="desktop-version-mismatch"]')
+        ?.textContent,
+    ).toBe(`desktopTabs.${key}`);
   });
 });
