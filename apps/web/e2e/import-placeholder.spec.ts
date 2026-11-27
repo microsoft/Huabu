@@ -121,7 +121,7 @@ test('a failed upload stays as a card that can be retried', async ({
   // The emulated touch device starts with the pen, which owns every pointer.
   await page.keyboard.press('s');
   await expect(page.locator('[data-sketch-overlay]')).toHaveCount(0);
-  await failed.getByRole('button', { name: 'Retry' }).click();
+  await failed.getByRole('button', { name: 'Retry' }).tap();
   await expect(page.locator('.react-flow__node-image')).toHaveCount(1);
   await expect(page.locator('[data-import-placeholder]')).toHaveCount(0);
 });
