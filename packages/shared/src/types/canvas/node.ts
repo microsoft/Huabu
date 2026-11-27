@@ -57,6 +57,7 @@ export const AGENT_CREATABLE_NODE_TYPES = [
   'pdf',
   'office',
   'video',
+  'audio',
   'frame',
   'question',
 ] as const;
@@ -609,7 +610,7 @@ export interface ImageNodeData extends BaseNodeData {
   src: string;
 }
 
-/** Audio node: audio content (typically recorded in-canvas) */
+/** Audio node: audio content, recorded in-canvas or created from a `src` */
 export interface AudioNodeData extends BaseNodeData {
   type: 'audio';
   src: string;

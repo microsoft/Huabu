@@ -1932,6 +1932,55 @@ describe('POST /api/rfs/:canvasId/execute', () => {
       await app.close();
     }
   });
+
+  it('creates an audio node from an uploaded file', async () => {
+    createCanvas('c1');
+    const app = await buildApp();
+    try {
+      const bytes = Buffer.from('RIFF-audio-bytes');
+      const up = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/upload/clip.wav',
+        headers: { 'content-type': 'application/octet-stream' },
+        payload: bytes,
+      });
+      expect(up.statusCode).toBe(201);
+      const src = up.json<{ id: string }>().id;
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/execute',
+        headers: { 'content-type': 'application/json' },
+        payload: {
+          commands: [
+            {
+              type: 'CREATE_NODES',
+              nodes: [
+                {
+                  nodeType: 'audio',
+                  data: { label: 'Clip', src },
+                  position: { x: 0, y: 0 },
+                },
+              ],
+            },
+          ],
+        },
+      });
+      expect(response.statusCode).toBe(200);
+      const created = rfsExecuteResponseSchema.parse(response.json());
+      const nodeId = created.results[0]?.nodes?.[0]?.nodeId;
+      if (!nodeId) throw new Error('Expected a created audio node');
+
+      const handle = space('c1');
+      expect((await handle.nodes.read(nodeId))?.record).toMatchObject({
+        type: 'audio',
+        src,
+      });
+      expect(await handle.artifacts.read(src)).toEqual(bytes);
+    } finally {
+      await app.close();
+    }
+  });
 });
 
 describe('POST/GET/DELETE /api/rfs/:canvasId/upload', () => {
