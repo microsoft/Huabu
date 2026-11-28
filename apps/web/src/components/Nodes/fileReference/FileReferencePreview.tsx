@@ -23,6 +23,10 @@ import {
   openFileReference,
 } from '@/store/previewWorkspace/actions';
 import { deviceFileName, isPdfDevicePath } from '@/utils/deviceFile';
+import {
+  downloadDeviceFile,
+  formatDeviceDownloadError,
+} from '@/utils/io/deviceFileDownload';
 
 import { splitMarkdownFrontmatter } from './markdownFrontmatter';
 
@@ -63,9 +67,11 @@ export function FileReferencePreview({
   const result = loaded?.identity === fileIdentity ? loaded.result : null;
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const generation = useRef(0);
   const controller = useRef<AbortController | null>(null);
+  const downloadController = useRef<AbortController | null>(null);
   const loadedBytes = useRef(0);
   const surfaceRef = useRef<HTMLDivElement>(null);
   const canvasId = useCanvasStore((state) => state.canvasId);
@@ -98,6 +104,13 @@ export function FileReferencePreview({
     frontmatter === null || markdownBody.trim().length > 0;
   useEffect(() => {
     setMode('reading');
+    downloadController.current?.abort();
+    downloadController.current = null;
+    setDownloading(false);
+    return () => {
+      downloadController.current?.abort();
+      downloadController.current = null;
+    };
   }, [agentletId, path]);
   useEffect(() => {
     const current = ++generation.current;
@@ -259,6 +272,33 @@ export function FileReferencePreview({
             </Button>
           </div>
         ) : null}
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={downloading}
+          onClick={() => {
+            if (!agentletId || !path || downloading) return;
+            downloadController.current?.abort();
+            const abort = new AbortController();
+            downloadController.current = abort;
+            setDownloading(true);
+            setError(null);
+            void downloadDeviceFile(agentletId, path, { signal: abort.signal })
+              .catch((failure: unknown) => {
+                if (!abort.signal.aborted) {
+                  setError(formatDeviceDownloadError(failure, t));
+                }
+              })
+              .finally(() => {
+                if (downloadController.current === abort) {
+                  downloadController.current = null;
+                  setDownloading(false);
+                }
+              });
+          }}
+        >
+          {downloading ? t('files.downloading') : t('files.download')}
+        </Button>
         <Button
           size="sm"
           variant="ghost"

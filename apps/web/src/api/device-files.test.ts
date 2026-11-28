@@ -7,6 +7,7 @@ import { ApiError } from './_client';
 import {
   DEVICE_BINARY_CHUNK_BYTES,
   DevicePdfLoadError,
+  loadDeviceFileBytes,
   loadDevicePdfBytes,
 } from './device-files';
 
@@ -243,5 +244,42 @@ describe('loadDevicePdfBytes', () => {
       }),
     ).rejects.toThrow();
     expect(fetchMock).toHaveBeenCalledOnce();
+  });
+});
+
+describe('loadDeviceFileBytes', () => {
+  it('loads arbitrary regular files (including empty and non-PDF binary files) without requiring a %PDF- header', async () => {
+    const raw = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x00, 0xff]);
+    fetchMock.mockResolvedValueOnce({
+      operation: 'fs-read-bytes',
+      result: {
+        path: '/assets/logo.png',
+        encoding: 'base64',
+        data: toBase64(raw),
+        byteLength: raw.length,
+        size: raw.length,
+        contentVersion: 'e'.repeat(64),
+      },
+    });
+
+    const loaded = await loadDeviceFileBytes('device-1', '/assets/logo.png');
+    expect(Array.from(loaded.bytes)).toEqual(Array.from(raw));
+    expect(loaded.size).toBe(raw.length);
+
+    fetchMock.mockResolvedValueOnce({
+      operation: 'fs-read-bytes',
+      result: {
+        path: '/assets/empty.txt',
+        encoding: 'base64',
+        data: '',
+        byteLength: 0,
+        size: 0,
+        contentVersion: 'f'.repeat(64),
+      },
+    });
+
+    const empty = await loadDeviceFileBytes('device-1', '/assets/empty.txt');
+    expect(empty.bytes.byteLength).toBe(0);
+    expect(empty.size).toBe(0);
   });
 });

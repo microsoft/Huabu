@@ -29,6 +29,9 @@ type FilesPanelEntryMenuProps = {
   selected?: boolean;
   /** Folders only: make this folder the root of the tree. */
   onOpenHere?: () => void;
+  /** Files only: download this entry to the browser without importing into the Space. */
+  onDownload?: () => void;
+  downloading?: boolean;
   /** Files only: open a reference card for this entry, adding one if needed. */
   onOpen?: () => void;
   /** Files only: place a reference card for this entry in the Space. */
@@ -45,6 +48,8 @@ export function FilesPanelEntryMenu({
   onCopyResult,
   selected,
   onOpenHere,
+  onDownload,
+  downloading = false,
   onOpen,
   onAdd,
   canAdd = false,
@@ -160,6 +165,17 @@ export function FilesPanelEntryMenu({
                 }}
               >
                 {t('files.openHere')}
+              </DropdownMenuItem>
+            ) : null}
+            {onDownload ? (
+              <DropdownMenuItem
+                disabled={downloading}
+                onClick={() => {
+                  setOpen(false);
+                  onDownload();
+                }}
+              >
+                {downloading ? t('files.downloading') : t('files.download')}
               </DropdownMenuItem>
             ) : null}
             {onOpen ? (

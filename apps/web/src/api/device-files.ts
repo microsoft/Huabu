@@ -12,18 +12,20 @@ import type {
   FileReadResult,
 } from '@huabu/shared';
 
-export const MAX_DEVICE_PDF_BYTES = 33_554_432;
+export const MAX_DEVICE_FILE_DOWNLOAD_BYTES = 33_554_432;
+export const MAX_DEVICE_PDF_BYTES = MAX_DEVICE_FILE_DOWNLOAD_BYTES;
 export const DEVICE_BINARY_CHUNK_BYTES = 262_144;
 
-export type DevicePdfErrorKind =
+export type DeviceBinaryErrorKind =
   | 'offline'
   | 'proxy_incompatible'
   | 'not_found'
   | 'permission_denied'
   | 'too_large'
   | 'changed'
-  | 'invalid_pdf'
   | 'failed';
+
+export type DevicePdfErrorKind = DeviceBinaryErrorKind | 'invalid_pdf';
 
 export class DevicePdfLoadError extends Error {
   constructor(
@@ -132,21 +134,24 @@ function mapDevicePdfApiError(error: unknown): never {
   throw error;
 }
 
-export async function loadDevicePdfBytes(
+interface LoadDeviceFileBytesInternalOptions {
+  signal?: AbortSignal;
+  maxBytes?: number;
+  onProgress?: (loadedBytes: number, totalBytes: number) => void;
+  validateFirstChunk?: (firstChunkBytes: Uint8Array) => void;
+}
+
+async function loadDeviceFileBytesInternal(
   agentletId: string,
   path: string,
-  options?: {
-    signal?: AbortSignal;
-    maxBytes?: number;
-    onProgress?: (loadedBytes: number, totalBytes: number) => void;
-  },
+  options?: LoadDeviceFileBytesInternalOptions,
 ): Promise<{
   bytes: Uint8Array<ArrayBuffer>;
   size: number;
   contentVersion: string;
   path: string;
 }> {
-  const maxBytes = options?.maxBytes ?? MAX_DEVICE_PDF_BYTES;
+  const maxBytes = options?.maxBytes ?? MAX_DEVICE_FILE_DOWNLOAD_BYTES;
   const signal = options?.signal;
   let cursor: string | undefined;
   let target: Uint8Array<ArrayBuffer> | null = null;
@@ -172,16 +177,10 @@ export async function loadDevicePdfBytes(
       if (chunk.size > maxBytes) {
         throw new DevicePdfLoadError(
           'too_large',
-          'File exceeds the PDF preview size limit',
+          'File exceeds the download size limit',
         );
       }
       if (!target) {
-        if (chunk.size < 5) {
-          throw new DevicePdfLoadError(
-            'invalid_pdf',
-            'File is not a valid PDF document',
-          );
-        }
         expectedSize = chunk.size;
         expectedVersion = chunk.contentVersion;
         resolvedPath = chunk.path;
@@ -192,7 +191,7 @@ export async function loadDevicePdfBytes(
       ) {
         throw new DevicePdfLoadError(
           'changed',
-          'File changed while loading PDF preview',
+          'File changed while reading from device',
         );
       }
 
@@ -211,7 +210,7 @@ export async function loadDevicePdfBytes(
       ) {
         throw new DevicePdfLoadError(
           'changed',
-          'Unexpected byte length while loading PDF preview',
+          'Unexpected byte length while reading from device',
         );
       }
       for (let index = 0; index < binary.length; index++) {
@@ -219,14 +218,8 @@ export async function loadDevicePdfBytes(
       }
       const firstChunk = offset === 0;
       offset += binary.length;
-      if (
-        firstChunk &&
-        !hasPdfMagicHeader(target.subarray(0, Math.min(offset, 1024)))
-      ) {
-        throw new DevicePdfLoadError(
-          'invalid_pdf',
-          'File does not start with a valid PDF header',
-        );
+      if (firstChunk) {
+        options?.validateFirstChunk?.(target.subarray(0, offset));
       }
       options?.onProgress?.(offset, expectedSize);
       cursor = chunk.nextCursor;
@@ -244,7 +237,7 @@ export async function loadDevicePdfBytes(
   if (!target || offset !== expectedSize) {
     throw new DevicePdfLoadError(
       'changed',
-      'Incomplete PDF read; refresh to try again',
+      'Incomplete file read; refresh to try again',
     );
   }
   return {
@@ -253,4 +246,54 @@ export async function loadDevicePdfBytes(
     contentVersion: expectedVersion,
     path: resolvedPath,
   };
+}
+
+export async function loadDeviceFileBytes(
+  agentletId: string,
+  path: string,
+  options?: {
+    signal?: AbortSignal;
+    maxBytes?: number;
+    onProgress?: (loadedBytes: number, totalBytes: number) => void;
+  },
+): Promise<{
+  bytes: Uint8Array<ArrayBuffer>;
+  size: number;
+  contentVersion: string;
+  path: string;
+}> {
+  return loadDeviceFileBytesInternal(agentletId, path, options);
+}
+
+export async function loadDevicePdfBytes(
+  agentletId: string,
+  path: string,
+  options?: {
+    signal?: AbortSignal;
+    maxBytes?: number;
+    onProgress?: (loadedBytes: number, totalBytes: number) => void;
+  },
+): Promise<{
+  bytes: Uint8Array<ArrayBuffer>;
+  size: number;
+  contentVersion: string;
+  path: string;
+}> {
+  return loadDeviceFileBytesInternal(agentletId, path, {
+    ...options,
+    maxBytes: options?.maxBytes ?? MAX_DEVICE_PDF_BYTES,
+    validateFirstChunk: (firstChunk) => {
+      if (
+        firstChunk.length < 5 ||
+        !hasPdfMagicHeader(
+          firstChunk.subarray(0, Math.min(firstChunk.length, 1024)),
+        )
+      ) {
+        throw new DevicePdfLoadError(
+          'invalid_pdf',
+          'File does not start with a valid PDF header',
+        );
+      }
+    },
+  });
 }

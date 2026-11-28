@@ -57,6 +57,10 @@ import {
 } from '@/store/previewWorkspace/store';
 import { deviceFileName, fileReferenceData } from '@/utils/deviceFile';
 import { copyToClipboard } from '@/utils/io/clipboard';
+import {
+  downloadDeviceFile,
+  formatDeviceDownloadError,
+} from '@/utils/io/deviceFileDownload';
 import { setDragPayload } from '@/utils/io/dragDrop';
 
 import {
@@ -111,9 +115,13 @@ export function FilesPanel() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [deviceMenuOpen, setDeviceMenuOpen] = useState(false);
   const [showHidden, setShowHidden] = useState(false);
-  // Failures of panel actions (copy, folder picker); listing failures live
-  // in the tree.
+  // Failures of panel actions (copy, folder picker, download); listing failures
+  // live in the tree.
   const [actionError, setActionError] = useState<string | null>(null);
+  const [downloadingPaths, setDownloadingPaths] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const downloadControllers = useRef<Map<string, AbortController>>(new Map());
   const [tree] = useState(() => new DeviceFileTree());
   const snapshot = useSyncExternalStore(tree.subscribe, tree.getSnapshot);
   const { pages, expanded, loading, reloading } = snapshot;
@@ -127,6 +135,13 @@ export function FilesPanel() {
   );
   useEffect(() => {
     void useAcpProfilesStore.getState().refresh();
+    const controllers = downloadControllers.current;
+    return () => {
+      for (const controller of controllers.values()) {
+        controller.abort();
+      }
+      controllers.clear();
+    };
   }, []);
   useEffect(() => {
     setActionError(null);
@@ -241,6 +256,37 @@ export function FilesPanel() {
       setActionError(
         failure instanceof Error ? failure.message : t('files.failed'),
       );
+    }
+  };
+  /** Download `entry` to the browser without importing it into the Space. */
+  const downloadEntry = async (entry: FileEntry) => {
+    if (!sourceAgentletId || entry.kind !== 'file') return;
+    const key = `${sourceAgentletId}\0${entry.path}`;
+    if (downloadControllers.current.has(key)) return;
+    const abort = new AbortController();
+    downloadControllers.current.set(key, abort);
+    setDownloadingPaths((prev) => {
+      const next = new Set(prev);
+      next.add(key);
+      return next;
+    });
+    setActionError(null);
+    try {
+      await downloadDeviceFile(sourceAgentletId, entry.path, {
+        signal: abort.signal,
+      });
+    } catch (failure) {
+      if (!abort.signal.aborted) {
+        setActionError(formatDeviceDownloadError(failure, t));
+      }
+    } finally {
+      downloadControllers.current.delete(key);
+      setDownloadingPaths((prev) => {
+        if (!prev.has(key)) return prev;
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
     }
   };
   const root = source && snapshot.root ? pages[snapshot.root] : undefined;
@@ -563,6 +609,16 @@ export function FilesPanel() {
               }
               selected={previewedPath === entry.path}
               onOpenHere={directory ? () => go(entry.path) : undefined}
+              onDownload={
+                entry.kind === 'file'
+                  ? () => void downloadEntry(entry)
+                  : undefined
+              }
+              downloading={
+                entry.kind === 'file' &&
+                Boolean(sourceAgentletId) &&
+                downloadingPaths.has(`${sourceAgentletId}\0${entry.path}`)
+              }
               onOpen={
                 entry.kind === 'file'
                   ? () => addToSpace(entry, true)
