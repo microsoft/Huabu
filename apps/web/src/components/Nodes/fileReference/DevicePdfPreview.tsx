@@ -38,6 +38,12 @@ import {
 } from '@/store/previewWorkspace/actions';
 import { readPdfPreviewView } from '@/store/previewWorkspace/scrollMemory';
 import { deviceFileName } from '@/utils/deviceFile';
+import {
+  downloadDeviceFile,
+  formatDeviceDownloadError,
+  resolveDeviceDownloadFilename,
+} from '@/utils/io/deviceFileDownload';
+import { triggerBlobDownload } from '@/utils/io/nodeDownload';
 
 import type { FileReference } from '@huabu/shared';
 
@@ -68,6 +74,8 @@ export function DevicePdfPreview({
 
   const [refresh, setRefresh] = useState(0);
   const [pending, setPending] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
   const [progress, setProgress] = useState<{
     loadedBytes: number;
     totalBytes: number;
@@ -85,7 +93,19 @@ export function DevicePdfPreview({
   } | null>(null);
 
   const generation = useRef(0);
+  const downloadController = useRef<AbortController | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    downloadController.current?.abort();
+    downloadController.current = null;
+    setDownloading(false);
+    setDownloadError(null);
+    return () => {
+      downloadController.current?.abort();
+      downloadController.current = null;
+    };
+  }, [fileIdentity]);
 
   const activePdf = loadedPdf?.identity === fileIdentity ? loadedPdf : null;
   const activeError = errorState?.identity === fileIdentity ? errorState : null;
@@ -345,8 +365,48 @@ export function DevicePdfPreview({
         <Button
           size="sm"
           variant="ghost"
+          disabled={downloading}
+          onClick={() => {
+            if (downloading) return;
+            setDownloadError(null);
+            if (activePdf) {
+              triggerBlobDownload(
+                activePdf.blob,
+                resolveDeviceDownloadFilename(path),
+              );
+              return;
+            }
+            downloadController.current?.abort();
+            const abort = new AbortController();
+            downloadController.current = abort;
+            setDownloading(true);
+            void downloadDeviceFile(agentletId, path, {
+              signal: abort.signal,
+              mimeType: 'application/pdf',
+            })
+              .catch((failure: unknown) => {
+                if (!abort.signal.aborted) {
+                  setDownloadError(formatDeviceDownloadError(failure, t));
+                }
+              })
+              .finally(() => {
+                if (downloadController.current === abort) {
+                  downloadController.current = null;
+                  setDownloading(false);
+                }
+              });
+          }}
+        >
+          {downloading ? t('files.downloading') : t('files.download')}
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
           disabled={pending}
-          onClick={() => setRefresh((value) => value + 1)}
+          onClick={() => {
+            setDownloadError(null);
+            setRefresh((value) => value + 1);
+          }}
         >
           {t('files.refresh')}
         </Button>
@@ -354,6 +414,10 @@ export function DevicePdfPreview({
       {errorMessage ? (
         <div role="alert" className="text-danger p-3 text-xs">
           {errorMessage}
+        </div>
+      ) : downloadError ? (
+        <div role="alert" className="text-danger p-3 text-xs">
+          {downloadError}
         </div>
       ) : null}
       {pending ? (

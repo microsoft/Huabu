@@ -55,7 +55,14 @@
     "pdfInvalid": "Could not render this PDF file. It may be corrupted or not a valid PDF.",
     "pdfNotFound": "This PDF file was not found on the device.",
     "pdfPermissionDenied": "Permission denied while reading this PDF file on the device.",
-    "pdfProxyIncompatible": "Update Agentlet on this device to preview PDF files."
+    "pdfProxyIncompatible": "Update Agentlet on this device to preview PDF files.",
+    "download": "Download",
+    "downloading": "Downloading…",
+    "downloadTooLarge": "This file exceeds the {{limitMiB}} MiB download limit. Open or copy it on its device instead.",
+    "downloadNotFound": "This file was not found on the device.",
+    "downloadPermissionDenied": "Permission denied while reading this file on the device.",
+    "downloadProxyIncompatible": "Update Agentlet on this device to download files.",
+    "downloadFailed": "Could not download the file. Please retry."
   },
   "remoteConversation": {
     "sourceNodeMissing": "The Agent node is no longer in this Space.",

@@ -11,6 +11,7 @@ import useCanvasStore from '@/store/canvasStore';
 import { FileReferencePreview } from './FileReferencePreview';
 
 import type * as DeviceFilesApi from '@/api/device-files';
+import type * as NodeDownloadModule from '@/utils/io/nodeDownload';
 import type * as ReactI18next from 'react-i18next';
 
 interface MockDocumentProps {
@@ -24,6 +25,8 @@ interface MockDocumentProps {
 const mocks = vi.hoisted(() => ({
   readText: vi.fn(),
   loadPdf: vi.fn(),
+  loadBytes: vi.fn(),
+  triggerDownload: vi.fn(),
   openFileReference: vi.fn(),
   closePreviewFile: vi.fn(),
   documentProps: null as MockDocumentProps | null,
@@ -47,8 +50,14 @@ vi.mock('@/api/device-files', async (original) => {
     ...actual,
     readDeviceFile: mocks.readText,
     loadDevicePdfBytes: mocks.loadPdf,
+    loadDeviceFileBytes: mocks.loadBytes,
   };
 });
+
+vi.mock('@/utils/io/nodeDownload', async (original) => ({
+  ...(await original<typeof NodeDownloadModule>()),
+  triggerBlobDownload: mocks.triggerDownload,
+}));
 
 vi.mock('@/store/previewWorkspace/actions', () => ({
   openFileReference: mocks.openFileReference,
@@ -363,5 +372,45 @@ describe('DevicePdfPreview via FileReferencePreview', () => {
       expect(host.querySelector('[data-testid="pdf-document"]')).not.toBeNull(),
     );
     expect(host.textContent).toContain('/papers/second.pdf');
+  });
+
+  it('downloads the already-loaded PDF Blob immediately without re-fetching from the device', async () => {
+    mocks.loadPdf.mockResolvedValue({
+      bytes: samplePdfBytes,
+      size: samplePdfBytes.length,
+      contentVersion: 'f'.repeat(64),
+      path: '/papers/attention.PDF',
+    });
+
+    await act(async () => {
+      root.render(
+        <FileReferencePreview
+          data={{
+            fileReference: {
+              agentletId: 'dev-linux',
+              path: '/papers/attention.PDF',
+            },
+          }}
+        />,
+      );
+    });
+    await vi.waitFor(() =>
+      expect(host.querySelector('[data-testid="pdf-document"]')).not.toBeNull(),
+    );
+
+    const downloadButton = [...host.querySelectorAll('button')].find(
+      (candidate) => candidate.textContent === 'files.download',
+    );
+    expect(downloadButton).toBeDefined();
+    await act(async () => {
+      downloadButton?.click();
+    });
+
+    expect(mocks.loadBytes).not.toHaveBeenCalled();
+    expect(mocks.triggerDownload).toHaveBeenCalledOnce();
+    expect(mocks.triggerDownload.mock.calls[0]?.[0]).toBe(
+      mocks.documentProps?.file,
+    );
+    expect(mocks.triggerDownload.mock.calls[0]?.[1]).toBe('attention.pdf');
   });
 });
