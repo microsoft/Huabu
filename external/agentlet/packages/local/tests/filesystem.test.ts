@@ -261,6 +261,72 @@ describe('stateless filesystem commands', () => {
       expect(
         await executeFsCommand('fs-read', { path: '/proc/self/status' }),
       ).toMatchObject({ ok: false, error: { code: 'unsupported_file' } });
+      expect(
+        await executeFsCommand('fs-read-bytes', { path: '/proc/self/status' }),
+      ).toMatchObject({ ok: false, error: { code: 'unsupported_file' } });
     },
   );
+
+  it('reads arbitrary binary chunks with versioned cursors, size caps, and cross-command cursor isolation', async () => {
+    const path = join(directory, 'sample.pdf');
+    const raw = Buffer.from([
+      0x25, 0x50, 0x44, 0x46, 0x2d, 0x00, 0xff, 0x80, 0x41, 0x42, 0x43,
+    ]);
+    await writeFile(path, raw);
+
+    expect(
+      await executeFsCommand('fs-read-bytes', {
+        path,
+        maxSizeBytes: raw.length - 1,
+      }),
+    ).toMatchObject({
+      ok: false,
+      error: { code: 'file_too_large' },
+    });
+
+    let cursor: string | undefined;
+    const chunks: Buffer[] = [];
+    do {
+      const response = await executeFsCommand('fs-read-bytes', {
+        path,
+        limitBytes: 3,
+        maxSizeBytes: raw.length,
+        ...(cursor ? { cursor } : {}),
+      });
+      if (!response.ok || !('data' in response.result))
+        throw new Error(JSON.stringify(response));
+      expect(response.result.encoding).toBe('base64');
+      const decoded = Buffer.from(response.result.data, 'base64');
+      expect(decoded.length).toBe(response.result.byteLength);
+      chunks.push(decoded);
+      cursor = response.result.nextCursor;
+    } while (cursor);
+    expect(Buffer.concat(chunks).equals(raw)).toBe(true);
+
+    const first = await executeFsCommand('fs-read-bytes', {
+      path,
+      limitBytes: 4,
+    });
+    if (!first.ok || !('data' in first.result) || !first.result.nextCursor)
+      throw new Error('Expected binary chunk');
+    expect(
+      await executeFsCommand('fs-read', {
+        path,
+        cursor: first.result.nextCursor,
+      }),
+    ).toMatchObject({
+      ok: false,
+      error: { code: 'invalid_request' },
+    });
+    await writeFile(path, Buffer.concat([raw, Buffer.from([0x0a])]));
+    expect(
+      await executeFsCommand('fs-read-bytes', {
+        path,
+        cursor: first.result.nextCursor,
+      }),
+    ).toMatchObject({
+      ok: false,
+      error: { code: 'stale_cursor' },
+    });
+  });
 });

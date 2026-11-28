@@ -61,6 +61,13 @@ class FilesystemProxy implements Agent {
               hint: '{"path":"/absolute/path","cursor":"optional","limitBytes":65536}',
             },
           },
+          {
+            name: 'fs-read-bytes',
+            description: 'Read binary bytes as base64 (filesystem contract v1)',
+            input: {
+              hint: '{"path":"/absolute/path","cursor":"optional","limitBytes":262144,"maxSizeBytes":33554432}',
+            },
+          },
         ],
       },
     });
@@ -71,7 +78,9 @@ class FilesystemProxy implements Agent {
       throw RequestError.invalidParams('Invalid or busy proxy session');
     if (params.prompt.length !== 1 || params.prompt[0]?.type !== 'text')
       throw RequestError.invalidParams('Expected one command text block');
-    const match = /^\/(fs-list|fs-read) ([\s\S]+)$/.exec(params.prompt[0].text);
+    const match = /^\/(fs-list|fs-read|fs-read-bytes) ([\s\S]+)$/.exec(
+      params.prompt[0].text,
+    );
     if (!match) throw RequestError.invalidParams('Unknown filesystem command');
     let input: unknown;
     try {
@@ -79,7 +88,12 @@ class FilesystemProxy implements Agent {
     } catch {
       throw RequestError.invalidParams('Expected JSON command arguments');
     }
-    const operation = match[1] === 'fs-list' ? 'fs-list' : 'fs-read';
+    const operation =
+      match[1] === 'fs-list'
+        ? 'fs-list'
+        : match[1] === 'fs-read'
+          ? 'fs-read'
+          : 'fs-read-bytes';
     const controller = new AbortController();
     this.active = controller;
     try {

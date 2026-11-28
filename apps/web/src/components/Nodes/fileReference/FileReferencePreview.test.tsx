@@ -5,17 +5,24 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
+import { DevicePdfLoadError } from '@/api/device-files';
+
 import { FileReferencePreview } from './FileReferencePreview';
 
+import type * as DeviceFilesApi from '@/api/device-files';
 import type { MilkdownPreviewProps } from '@/components/Milkdown/MilkdownPreview';
+import type * as NodeDownloadModule from '@/utils/io/nodeDownload';
 import type { FileReadResult } from '@huabu/shared';
 import type * as ReactI18next from 'react-i18next';
 
 const mocks = vi.hoisted(() => ({
   read: vi.fn(),
+  loadBytes: vi.fn(),
+  triggerDownload: vi.fn(),
   viewer: vi.fn(),
   markdown: vi.fn(),
-  t: (key: string) => key,
+  t: (key: string, options?: Record<string, unknown>) =>
+    options?.limitMiB !== undefined ? `${key}:${options.limitMiB}` : key,
 }));
 vi.mock('@/components/Milkdown/MilkdownPreview', () => ({
   MilkdownPreview: (props: MilkdownPreviewProps) => {
@@ -23,7 +30,15 @@ vi.mock('@/components/Milkdown/MilkdownPreview', () => ({
     return <article>{props.markdown}</article>;
   },
 }));
-vi.mock('@/api/device-files', () => ({ readDeviceFile: mocks.read }));
+vi.mock('@/api/device-files', async (original) => ({
+  ...(await original<typeof DeviceFilesApi>()),
+  readDeviceFile: mocks.read,
+  loadDeviceFileBytes: mocks.loadBytes,
+}));
+vi.mock('@/utils/io/nodeDownload', async (original) => ({
+  ...(await original<typeof NodeDownloadModule>()),
+  triggerBlobDownload: mocks.triggerDownload,
+}));
 vi.mock('react-i18next', async (original) => ({
   ...(await original<typeof ReactI18next>()),
   useTranslation: () => ({ t: mocks.t }),
@@ -324,4 +339,36 @@ it('handles empty frontmatter, frontmatter-only files, and unterminated opening 
   expect(
     host.querySelector('section[aria-label="files.frontmatter"]'),
   ).toBeNull();
+});
+
+it('downloads the full original file from the preview toolbar via fs-read-bytes even when preview text is capped at 256 KiB', async () => {
+  mocks.read.mockResolvedValueOnce(result('\\documentclass{article}'));
+  const fullBytes = new TextEncoder().encode('complete-file-bytes-400k');
+  mocks.loadBytes.mockResolvedValueOnce({
+    bytes: fullBytes,
+    size: fullBytes.length,
+    contentVersion: 'a'.repeat(64),
+    path: '/source.tex',
+  });
+  await open();
+
+  await act(async () => button('files.download').click());
+  await vi.waitFor(() => expect(mocks.triggerDownload).toHaveBeenCalledOnce());
+  expect(mocks.loadBytes).toHaveBeenCalledWith(
+    'remote-device',
+    '/source.tex',
+    expect.objectContaining({ signal: expect.any(AbortSignal) }),
+  );
+  expect(mocks.triggerDownload.mock.calls[0]?.[0]).toBeInstanceOf(Blob);
+  expect(mocks.triggerDownload.mock.calls[0]?.[1]).toBe('source.tex');
+
+  mocks.loadBytes.mockRejectedValueOnce(
+    new DevicePdfLoadError('too_large', 'Too large'),
+  );
+  await act(async () => button('files.download').click());
+  await vi.waitFor(() =>
+    expect(host.querySelector('[role="alert"]')?.textContent).toBe(
+      'files.downloadTooLarge:32',
+    ),
+  );
 });

@@ -6,13 +6,16 @@ import { open, opendir, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import {
+  FS_MAX_BINARY_BYTES,
   FS_MAX_ENTRIES,
   FS_MAX_TEXT_BYTES,
   FS_PROTOCOL_VERSION,
   parseFsRequest,
+  type FsBinaryReadResult,
   type FsEntry,
   type FsErrorCode,
   type FsOperation,
+  type FsReadResult,
   type FsRequest,
   type FsResponse,
 } from '@agentlet/protocol';
@@ -143,7 +146,23 @@ async function list(request: FsRequest, signal: AbortSignal) {
   };
 }
 
-async function read(request: FsRequest, signal: AbortSignal) {
+interface FileSlice {
+  filename: string;
+  buffer: Buffer;
+  bytesRead: number;
+  limit: number;
+  offset: number;
+  size: number;
+  contentVersion: string;
+}
+
+async function readFileSlice(
+  request: FsRequest,
+  defaultLimitBytes: number,
+  cursorEncoding: 'utf-8' | 'base64',
+  unsupportedMessage: string,
+  signal: AbortSignal,
+): Promise<FileSlice> {
   const filename = absolutePath(request.path);
   // O_NONBLOCK prevents a FIFO substituted before open from hanging the process.
   const handle = await open(
@@ -153,15 +172,21 @@ async function read(request: FsRequest, signal: AbortSignal) {
   try {
     const before = await handle.stat();
     if (!before.isFile())
-      throw new FsFailure(
-        'unsupported_file',
-        'Only regular text files are supported',
-      );
+      throw new FsFailure('unsupported_file', unsupportedMessage);
     if (!Number.isSafeInteger(before.size))
       throw new FsFailure(
         'unsupported_file',
         'File size exceeds the supported range',
       );
+    if (
+      request.maxSizeBytes !== undefined &&
+      before.size > request.maxSizeBytes
+    ) {
+      throw new FsFailure(
+        'file_too_large',
+        'File exceeds the preview size limit',
+      );
+    }
     const version = (stat: typeof before) =>
       createHash('sha256')
         .update(
@@ -170,14 +195,20 @@ async function read(request: FsRequest, signal: AbortSignal) {
         .digest('hex');
     const contentVersion = version(before);
     const previous = decodeCursor(request.cursor);
-    if (
-      previous &&
-      (previous.path !== filename || previous.version !== contentVersion)
-    ) {
-      throw new FsFailure(
-        'stale_cursor',
-        'File changed; read it again from the beginning',
-      );
+    if (previous) {
+      const previousEncoding = previous.encoding ?? 'utf-8';
+      if (previousEncoding !== cursorEncoding) {
+        throw new FsFailure(
+          'invalid_request',
+          'Cursor does not match this read command',
+        );
+      }
+      if (previous.path !== filename || previous.version !== contentVersion) {
+        throw new FsFailure(
+          'stale_cursor',
+          'File changed; read it again from the beginning',
+        );
+      }
     }
     const offset = previous?.offset ?? 0;
     if (
@@ -189,7 +220,7 @@ async function read(request: FsRequest, signal: AbortSignal) {
       throw new FsFailure('invalid_request', 'Invalid continuation offset');
     }
     signal.throwIfAborted();
-    const limit = request.limitBytes ?? FS_MAX_TEXT_BYTES;
+    const limit = request.limitBytes ?? defaultLimitBytes;
     const buffer = Buffer.alloc(limit + 1);
     let bytesRead = 0;
     while (bytesRead < buffer.length) {
@@ -213,48 +244,102 @@ async function read(request: FsRequest, signal: AbortSignal) {
       );
     if (bytesRead < Math.min(buffer.length, before.size - offset))
       throw new FsFailure('io_error', 'File ended before its reported size');
-    let length = Math.min(bytesRead, limit);
-    if (bytesRead > limit) {
-      while (length > 0 && (buffer[length]! & 0xc0) === 0x80) length--;
-    }
-    let text: string;
-    try {
-      text = new TextDecoder('utf-8', {
-        fatal: true,
-        ignoreBOM: offset !== 0,
-      }).decode(buffer.subarray(0, length));
-    } catch {
-      throw new FsFailure(
-        'unsupported_encoding',
-        'File is not valid UTF-8 text',
-      );
-    }
-    if (/[\u0000-\u0008\u000b\u000e-\u001f]/.test(text)) {
-      throw new FsFailure(
-        'unsupported_encoding',
-        'File contains unsupported binary or control data',
-      );
-    }
     return {
-      path: filename,
-      encoding: 'utf-8' as const,
-      text,
-      byteLength: length,
+      filename,
+      buffer,
+      bytesRead,
+      limit,
+      offset,
       size: before.size,
       contentVersion,
-      ...(offset + length < before.size
-        ? {
-            nextCursor: cursor({
-              path: filename,
-              version: contentVersion,
-              offset: offset + length,
-            }),
-          }
-        : {}),
     };
   } finally {
     await handle.close();
   }
+}
+
+async function read(
+  request: FsRequest,
+  signal: AbortSignal,
+): Promise<FsReadResult> {
+  const { filename, buffer, bytesRead, limit, offset, size, contentVersion } =
+    await readFileSlice(
+      request,
+      FS_MAX_TEXT_BYTES,
+      'utf-8',
+      'Only regular text files are supported',
+      signal,
+    );
+  let length = Math.min(bytesRead, limit);
+  if (bytesRead > limit) {
+    while (length > 0 && (buffer[length]! & 0xc0) === 0x80) length--;
+  }
+  let text: string;
+  try {
+    text = new TextDecoder('utf-8', {
+      fatal: true,
+      ignoreBOM: offset !== 0,
+    }).decode(buffer.subarray(0, length));
+  } catch {
+    throw new FsFailure('unsupported_encoding', 'File is not valid UTF-8 text');
+  }
+  if (/[\u0000-\u0008\u000b\u000e-\u001f]/.test(text)) {
+    throw new FsFailure(
+      'unsupported_encoding',
+      'File contains unsupported binary or control data',
+    );
+  }
+  return {
+    path: filename,
+    encoding: 'utf-8' as const,
+    text,
+    byteLength: length,
+    size,
+    contentVersion,
+    ...(offset + length < size
+      ? {
+          nextCursor: cursor({
+            path: filename,
+            version: contentVersion,
+            offset: offset + length,
+          }),
+        }
+      : {}),
+  };
+}
+
+async function readBytes(
+  request: FsRequest,
+  signal: AbortSignal,
+): Promise<FsBinaryReadResult> {
+  const { filename, buffer, bytesRead, limit, offset, size, contentVersion } =
+    await readFileSlice(
+      request,
+      FS_MAX_BINARY_BYTES,
+      'base64',
+      'Only regular files are supported',
+      signal,
+    );
+  const length = Math.min(bytesRead, limit);
+  const data = buffer.subarray(0, length).toString('base64');
+  return {
+    path: filename,
+    encoding: 'base64' as const,
+    data,
+    byteLength: length,
+    size,
+    contentVersion,
+    ...(offset + length < size
+      ? {
+          nextCursor: cursor({
+            encoding: 'base64',
+            path: filename,
+            version: contentVersion,
+            offset: offset + length,
+          }),
+        }
+      : {}),
+  };
 }
 
 export async function executeFsCommand(
@@ -272,7 +357,9 @@ export async function executeFsCommand(
     const result =
       operation === 'fs-list'
         ? await list(request, signal)
-        : await read(request, signal);
+        : operation === 'fs-read'
+          ? await read(request, signal)
+          : await readBytes(request, signal);
     signal.throwIfAborted();
     return { version: FS_PROTOCOL_VERSION, operation, ok: true, result };
   } catch (error) {

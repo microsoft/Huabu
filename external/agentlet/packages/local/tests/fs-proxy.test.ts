@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
-import { supportsFsProtocol } from '@agentlet/protocol';
+import { supportsFsBinaryRead, supportsFsProtocol } from '@agentlet/protocol';
 import { expect, it } from 'vitest';
 import { AgentProcess } from '../src/agent-process.js';
 import { proxyHarness } from '../src/harnesses/proxy.js';
@@ -50,6 +50,8 @@ it('speaks ACP over stdio with discoverable deterministic filesystem commands', 
     });
   try {
     await writeFile(join(directory, 'source.tex'), '\\documentclass{article}');
+    const pdfBytes = Buffer.from('%PDF-1.7\n\x00\xffEOF');
+    await writeFile(join(directory, 'paper.pdf'), pdfBytes);
     const initialized = await request('initialize', {
       protocolVersion: 1,
       clientCapabilities: {},
@@ -59,7 +61,9 @@ it('speaks ACP over stdio with discoverable deterministic filesystem commands', 
       agentInfo: { name: 'proxy' },
       agentCapabilities: {
         loadSession: false,
-        _meta: { 'com.microsoft.agentlet/filesystem': { version: 1 } },
+        _meta: {
+          'com.microsoft.agentlet/filesystem': { version: 1, binaryRead: true },
+        },
       },
     });
     if (
@@ -69,6 +73,7 @@ it('speaks ACP over stdio with discoverable deterministic filesystem commands', 
     )
       throw new Error('Missing ACP capabilities');
     expect(supportsFsProtocol(initialized.agentCapabilities)).toBe(true);
+    expect(supportsFsBinaryRead(initialized.agentCapabilities)).toBe(true);
     expect(notifications).toEqual([]);
     const session = await request('session/new', {
       cwd: directory,
@@ -81,6 +86,7 @@ it('speaks ACP over stdio with discoverable deterministic filesystem commands', 
     );
     expect(JSON.stringify(notifications)).toContain('fs-list');
     expect(JSON.stringify(notifications)).toContain('fs-read');
+    expect(JSON.stringify(notifications)).toContain('fs-read-bytes');
     expect(
       await request('session/prompt', {
         sessionId: session.sessionId,
@@ -105,6 +111,20 @@ it('speaks ACP over stdio with discoverable deterministic filesystem commands', 
       }),
     ).toEqual({ stopReason: 'end_turn' });
     expect(JSON.stringify(notifications)).toContain('documentclass');
+    expect(
+      await request('session/prompt', {
+        sessionId: session.sessionId,
+        prompt: [
+          {
+            type: 'text',
+            text: `/fs-read-bytes ${JSON.stringify({ path: join(directory, 'paper.pdf') })}`,
+          },
+        ],
+      }),
+    ).toEqual({ stopReason: 'end_turn' });
+    expect(JSON.stringify(notifications)).toContain(
+      pdfBytes.toString('base64'),
+    );
     await expect(
       request('session/prompt', {
         sessionId: session.sessionId,
@@ -147,7 +167,9 @@ it('preserves filesystem capability through harness launch and daemon bootstrap'
       protocolVersion: 1,
       agentInfo: { name: 'proxy' },
       agentCapabilities: {
-        _meta: { 'com.microsoft.agentlet/filesystem': { version: 1 } },
+        _meta: {
+          'com.microsoft.agentlet/filesystem': { version: 1, binaryRead: true },
+        },
       },
     });
     expect(profile.bootstrapNotifications).toContainEqual({
@@ -160,6 +182,7 @@ it('preserves filesystem capability through harness launch and daemon bootstrap'
           availableCommands: [
             expect.objectContaining({ name: 'fs-list' }),
             expect.objectContaining({ name: 'fs-read' }),
+            expect.objectContaining({ name: 'fs-read-bytes' }),
           ],
         },
       },

@@ -25,9 +25,16 @@ const deviceFilesRoutes: FastifyPluginAsync = async (app) => {
       });
     await requireOwnAgentlet(parsed.data.agentletId);
     reply.header('Cache-Control', 'no-store');
+    const abortController = new AbortController();
+    const abortOnRequestClose = () => abortController.abort();
+    const abortOnReplyClose = () => {
+      if (!reply.sent) abortController.abort();
+    };
+    request.raw.once('aborted', abortOnRequestClose);
+    reply.raw.once('close', abortOnReplyClose);
     try {
       service ??= new DeviceFilesService(app.log);
-      return await service.execute(parsed.data);
+      return await service.execute(parsed.data, abortController.signal);
     } catch (error) {
       request.log.warn(
         {
@@ -50,6 +57,9 @@ const deviceFilesRoutes: FastifyPluginAsync = async (app) => {
               ? error.message
               : 'Filesystem service unavailable',
         });
+    } finally {
+      request.raw.off('aborted', abortOnRequestClose);
+      reply.raw.off('close', abortOnReplyClose);
     }
   });
 };

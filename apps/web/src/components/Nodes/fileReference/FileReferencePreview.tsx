@@ -22,7 +22,11 @@ import {
   closePreviewFile,
   openFileReference,
 } from '@/store/previewWorkspace/actions';
-import { deviceFileName } from '@/utils/deviceFile';
+import { deviceFileName, isPdfDevicePath } from '@/utils/deviceFile';
+import {
+  downloadDeviceFile,
+  formatDeviceDownloadError,
+} from '@/utils/io/deviceFileDownload';
 
 import { splitMarkdownFrontmatter } from './markdownFrontmatter';
 
@@ -40,15 +44,21 @@ const MarkdownViewer = lazy(async () => ({
   default: (await import('@/components/Milkdown/MilkdownPreview'))
     .MilkdownPreview,
 }));
+const DevicePdfViewer = lazy(() => import('./DevicePdfPreview'));
 const MAX_PREVIEW_BYTES = 262_144;
 
-export function FileReferencePreview({ id, data }: PreviewComponentProps) {
+export function FileReferencePreview({
+  id,
+  data,
+  scrollViewKey,
+}: PreviewComponentProps) {
   const { t } = useTranslation();
   const reference = isFileReference(data.fileReference)
     ? data.fileReference
     : null;
   const agentletId = reference?.agentletId;
   const path = reference?.path;
+  const isPdf = path ? isPdfDevicePath(path) : false;
   const fileIdentity = `${agentletId ?? ''}\0${path ?? ''}`;
   const [loaded, setLoaded] = useState<{
     identity: string;
@@ -57,9 +67,11 @@ export function FileReferencePreview({ id, data }: PreviewComponentProps) {
   const result = loaded?.identity === fileIdentity ? loaded.result : null;
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const generation = useRef(0);
   const controller = useRef<AbortController | null>(null);
+  const downloadController = useRef<AbortController | null>(null);
   const loadedBytes = useRef(0);
   const surfaceRef = useRef<HTMLDivElement>(null);
   const canvasId = useCanvasStore((state) => state.canvasId);
@@ -92,6 +104,13 @@ export function FileReferencePreview({ id, data }: PreviewComponentProps) {
     frontmatter === null || markdownBody.trim().length > 0;
   useEffect(() => {
     setMode('reading');
+    downloadController.current?.abort();
+    downloadController.current = null;
+    setDownloading(false);
+    return () => {
+      downloadController.current?.abort();
+      downloadController.current = null;
+    };
   }, [agentletId, path]);
   useEffect(() => {
     const current = ++generation.current;
@@ -102,7 +121,7 @@ export function FileReferencePreview({ id, data }: PreviewComponentProps) {
     setLoaded(null);
     setError(null);
     setRenderError(null);
-    if (!agentletId || !path) return;
+    if (!agentletId || !path || isPdf) return;
     setPending(true);
     void readDeviceFile(agentletId, { path }, abort.signal)
       .then((value) => {
@@ -124,7 +143,7 @@ export function FileReferencePreview({ id, data }: PreviewComponentProps) {
       generation.current = current + 1;
       abort.abort();
     };
-  }, [agentletId, fileIdentity, path, refresh, t]);
+  }, [agentletId, fileIdentity, isPdf, path, refresh, t]);
 
   const more = async () => {
     if (
@@ -171,6 +190,17 @@ export function FileReferencePreview({ id, data }: PreviewComponentProps) {
         {t('files.invalidReference')}
       </div>
     );
+  if (isPdf) {
+    return (
+      <Suspense fallback={<div className="p-3">{t('files.loading')}</div>}>
+        <DevicePdfViewer
+          id={id}
+          reference={reference}
+          scrollViewKey={scrollViewKey}
+        />
+      </Suspense>
+    );
+  }
   return (
     <div ref={surfaceRef} className="flex h-full min-h-0 flex-col">
       {canvasId && agentletId ? (
@@ -242,6 +272,33 @@ export function FileReferencePreview({ id, data }: PreviewComponentProps) {
             </Button>
           </div>
         ) : null}
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={downloading}
+          onClick={() => {
+            if (!agentletId || !path || downloading) return;
+            downloadController.current?.abort();
+            const abort = new AbortController();
+            downloadController.current = abort;
+            setDownloading(true);
+            setError(null);
+            void downloadDeviceFile(agentletId, path, { signal: abort.signal })
+              .catch((failure: unknown) => {
+                if (!abort.signal.aborted) {
+                  setError(formatDeviceDownloadError(failure, t));
+                }
+              })
+              .finally(() => {
+                if (downloadController.current === abort) {
+                  downloadController.current = null;
+                  setDownloading(false);
+                }
+              });
+          }}
+        >
+          {downloading ? t('files.downloading') : t('files.download')}
+        </Button>
         <Button
           size="sm"
           variant="ghost"

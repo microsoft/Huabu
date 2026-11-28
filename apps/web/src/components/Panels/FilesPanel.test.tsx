@@ -5,6 +5,7 @@ import { act, useImperativeHandle, type ReactNode, type Ref } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
+import { DevicePdfLoadError } from '@/api/device-files';
 import { useAcpProfilesStore } from '@/store/acpProfilesStore';
 import useCanvasStore from '@/store/canvasStore';
 import { usePanelStore } from '@/store/panelStore';
@@ -12,20 +13,33 @@ import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 
 import { FilesPanel } from './FilesPanel';
 
+import type * as DeviceFilesApi from '@/api/device-files';
 import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent';
 import type * as PreviewActions from '@/store/previewWorkspace/actions';
+import type * as NodeDownloadModule from '@/utils/io/nodeDownload';
 import type { FileListResult } from '@huabu/shared';
 import type * as ReactI18next from 'react-i18next';
 
 const mocks = vi.hoisted(() => ({
   list: vi.fn(),
+  loadBytes: vi.fn(),
+  triggerDownload: vi.fn(),
   preview: vi.fn(),
   add: vi.fn(),
   copy: vi.fn(),
   open: vi.fn(),
-  t: (key: string) => key,
+  t: (key: string, options?: Record<string, unknown>) =>
+    options?.limitMiB !== undefined ? `${key}:${options.limitMiB}` : key,
 }));
-vi.mock('@/api/device-files', () => ({ listDeviceFiles: mocks.list }));
+vi.mock('@/api/device-files', async (original) => ({
+  ...(await original<typeof DeviceFilesApi>()),
+  listDeviceFiles: mocks.list,
+  loadDeviceFileBytes: mocks.loadBytes,
+}));
+vi.mock('@/utils/io/nodeDownload', async (original) => ({
+  ...(await original<typeof NodeDownloadModule>()),
+  triggerBlobDownload: mocks.triggerDownload,
+}));
 vi.mock('@/store/previewWorkspace/actions', async (original) => ({
   ...(await original<typeof PreviewActions>()),
   openFileReference: mocks.open,
@@ -382,7 +396,7 @@ it('replaces native row menus with three metadata copy actions but retains nativ
       'files.copyRelativePath',
       'files.copyFullPath',
       ...(entry.kind === 'file'
-        ? ['files.openPreview', 'files.addToSpace']
+        ? ['files.download', 'files.openPreview', 'files.addToSpace']
         : ['files.openHere']),
     ]);
     await selectCopy('files.copyName', entry.name);
@@ -894,4 +908,75 @@ it('moves focus between rows with the arrow, Home and End keys', async () => {
   expect(document.activeElement?.textContent).toBe(file.name);
   await press('ArrowUp');
   expect(document.activeElement?.textContent).toBe('folder');
+});
+
+it('downloads files from the entry menu even in read-only Spaces without importing into the Space, and surfaces download failures', async () => {
+  useCanvasStore.setState({
+    canvasAccess: { canvasId: 'canvas-files', write: false, manage: false },
+  });
+  const dotfile = {
+    name: '.gitignore',
+    path: '/root/.gitignore',
+    kind: 'file' as const,
+  };
+  const folder = {
+    name: 'folder',
+    path: '/root/folder',
+    kind: 'directory' as const,
+  };
+  mocks.list.mockResolvedValueOnce(page([folder, file, dotfile]));
+  mocks.loadBytes.mockResolvedValueOnce({
+    bytes: new TextEncoder().encode('node_modules/\n'),
+    size: 14,
+    contentVersion: 'a'.repeat(64),
+    path: '/root/.gitignore',
+  });
+
+  await act(async () => root.render(<FilesPanel />));
+
+  // Folders never offer Download.
+  await openMenu('folder');
+  expect(
+    [...document.querySelectorAll('[role="menuitem"]')].some(
+      (item) => item.textContent === 'files.download',
+    ),
+  ).toBe(false);
+  await act(async () =>
+    document.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+    ),
+  );
+
+  // Read-only Space still allows downloading a file (including dotfiles) without creating nodes.
+  await openMenu('.gitignore');
+  const downloadDotfile = [
+    ...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+  ].find((item) => item.textContent === 'files.download');
+  expect(downloadDotfile?.disabled).toBe(false);
+  await act(async () => downloadDotfile?.click());
+  await vi.waitFor(() => expect(mocks.triggerDownload).toHaveBeenCalledOnce());
+  expect(mocks.loadBytes).toHaveBeenCalledWith(
+    'device',
+    '/root/.gitignore',
+    expect.objectContaining({ signal: expect.any(AbortSignal) }),
+  );
+  expect(mocks.triggerDownload.mock.calls[0]?.[0]).toBeInstanceOf(Blob);
+  expect(mocks.triggerDownload.mock.calls[0]?.[1]).toBe('.gitignore');
+  expect(mocks.add).not.toHaveBeenCalled();
+
+  // Oversized download surfaces localized alert without touching the Space.
+  mocks.loadBytes.mockRejectedValueOnce(
+    new DevicePdfLoadError('too_large', 'Too large'),
+  );
+  await openMenu(file.name);
+  const downloadFile = [
+    ...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+  ].find((item) => item.textContent === 'files.download');
+  await act(async () => downloadFile?.click());
+  await vi.waitFor(() =>
+    expect(host.querySelector('[role="alert"]')?.textContent).toBe(
+      'files.downloadTooLarge:32',
+    ),
+  );
+  expect(mocks.add).not.toHaveBeenCalled();
 });
