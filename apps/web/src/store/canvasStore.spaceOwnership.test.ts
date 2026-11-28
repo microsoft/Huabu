@@ -5,7 +5,10 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import { canvasHistoryManager } from './canvasHistoryManager';
 import useCanvasStore, { resetCanvasSyncForTests } from './canvasStore';
-import { createFakeSpaceServer } from './canvasStore/sync/testing/fakeExecuteServer';
+import {
+  createFakeSpaceServer,
+  seedStoredNodes,
+} from './canvasStore/sync/testing/fakeExecuteServer';
 import { useGesturePreviewStore } from './gesturePreviewStore';
 import { useWorkspaceStore } from './workspaceStore';
 import * as api from '../api';
@@ -208,11 +211,12 @@ it('deletes ordinary nodes and selected edges in one undoable execution', async 
     position: { x: 0, y: 0 },
     data: { content: 'Ordinary' },
   };
-  const nodes = [note, ...endpoints];
+  // As loaded from the server: every node has its paint key.
+  const nodes = seedStoredNodes([note, ...endpoints]);
   useCanvasStore.getState()._setStateRaw({ nodes, edges: [edge] });
   server.reset(nodes, [edge], 0);
   useCanvasStore.getState().deleteNodes([note.id], [edge.id]);
-  expect(useCanvasStore.getState().nodes).toEqual(endpoints);
+  expect(useCanvasStore.getState().nodes).toEqual(nodes.slice(1));
   expect(useCanvasStore.getState().edges).toEqual([]);
   await vi.waitFor(() => expect(sentDeletions()).toEqual([note.id]));
   await useCanvasStore.getState().undo();
@@ -340,7 +344,7 @@ it('cuts an ordinary selection by copying it and then removing it, but not durin
   const stay = (id: string) => ({ ...note, id, selected: false });
   const kept = { id: 'kept', source: 'a', target: 'b', selected: true };
   const taken = { id: 'taken', source: 'a', target: note.id };
-  const cutNodes = [note, stay('a'), stay('b')];
+  const cutNodes = seedStoredNodes([note, stay('a'), stay('b')]);
   useCanvasStore.getState()._setStateRaw({
     nodes: cutNodes,
     edges: [kept, taken],
@@ -413,11 +417,13 @@ it('does not consume a redo snapshot that would remove a now-canonical entry', a
     spaceTitlesStatus: 'ready',
     spaceSummaries: { child: { parentSpaceId: null, parentEntryNodeId: null } },
   });
-  canvasHistoryManager.takeSnapshot([entry], []);
+  // A snapshot holds nodes as the page had them: keyed.
+  const [keyed] = seedStoredNodes([entry]);
+  canvasHistoryManager.takeSnapshot([keyed], []);
   await useCanvasStore.getState().undo();
   knowChild();
   await useCanvasStore.getState().redo();
-  expect(useCanvasStore.getState().nodes).toEqual([entry]);
+  expect(useCanvasStore.getState().nodes).toEqual([keyed]);
   expect(canvasHistoryManager.canRedo).toBe(true);
   expect(sentDeletions()).toEqual([]);
 });

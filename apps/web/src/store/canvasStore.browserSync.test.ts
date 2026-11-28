@@ -7,7 +7,6 @@ const api = vi.hoisted(() => ({
   postCanvasExecute: vi.fn(),
   getCanvas: vi.fn(),
   putNodeContent: vi.fn(),
-  preprocessNode: vi.fn(),
   postCanvasEvents: vi.fn(),
 }));
 vi.mock('../api', async (actual) => ({
@@ -28,7 +27,9 @@ import {
   autoHeightKey,
   intrinsicToLayoutHeight,
   measuredSizeKey,
+  seedNodeOrder,
   type Delta,
+  type NestableNode,
 } from '@huabu/shared/canvas-engine';
 
 import { dismissToast, toast } from '@/components/Common/Toast';
@@ -127,7 +128,6 @@ function deliver(update: PostCanvasExecuteResponse, source: 'ui' | 'agent') {
     update.toVersion,
     update.pendingEffects as Parameters<typeof current.applyServerDeltas>[2],
     false,
-    { events: update.orderEvents },
     {
       ...(update.operationId ? { operationId: update.operationId } : {}),
       source,
@@ -215,7 +215,11 @@ beforeEach(() => {
   resetCanvasSyncForTests();
   setCanvasSyncLineageForTests(SPACE, FAKE_LINEAGE);
   own = [];
-  const nodes = [note(X, 0, 0), note(Y, 0, 300)];
+  // A page loads its Space from the server, which keys every node.
+  const nodes = seedNodeOrder([
+    note(X, 0, 0),
+    note(Y, 0, 300),
+  ] as unknown as NestableNode[]) as unknown as Node[];
   server.reset(nodes, [], 1);
   canvasHistoryManager.activate(SPACE, true);
   state()._setStateRaw({
@@ -242,7 +246,6 @@ beforeEach(() => {
     state: { nodes: server.state.nodes, edges: server.state.edges },
   }));
   api.putNodeContent.mockResolvedValue({ nodeId: X, label: null, rev: 'rev' });
-  api.preprocessNode.mockResolvedValue({ success: true });
   api.postCanvasEvents.mockResolvedValue({ success: true });
 });
 
@@ -1572,13 +1575,14 @@ describe('undo and redo beyond what commands can say', () => {
         type: 'RESTORE_NODES',
         nodes: [expect.objectContaining({ id: X, data: original.data })],
       },
-      // It comes back where it was in the paint order.
-      { type: 'REORDER_NODES', nodeIds: [X], to: { before: Y } },
     ]);
     // A move made before the restore is answered goes out after it.
     moveHere(X, 700);
     await answer(1);
     expect(serverNode(X)?.data).toMatchObject(original.data);
+    // It comes back where it was in the paint order, by the key it carries.
+    expect(state().nodes.map((n) => n.id)).toEqual([X, Y]);
+    expect(server.state.nodes.map((n) => n.id)).toEqual([X, Y]);
     await vi.advanceTimersByTimeAsync(0);
     await answer(2);
     expect(serverNode(X)?.position).toEqual({ x: 700, y: 0 });
@@ -2840,5 +2844,95 @@ describe('what is sent is decided by one rule, also around a pointer gesture', (
     expect(canvasHistoryManager.canUndo).toBe(false);
     await answer(0);
     expect(serverNode(X)?.data.pinnedForTest).toBe('yes');
+  });
+});
+
+describe('a command batch marks no node as being processed on the page', () => {
+  // The server starts preprocessing where a batch is committed; a page only
+  // shows the status the server announces (see `canvasSyncStore.test.ts`).
+  const PDF = 'node-sync-pdf';
+  const pdf: Node = {
+    id: PDF,
+    type: 'pdf',
+    position: { x: 600, y: 0 },
+    style: { width: 160, height: 160 },
+    data: {
+      type: 'pdf',
+      label: 'Paper',
+      labelSource: 'user',
+      src: 'artifact-paper.pdf',
+    },
+  };
+  const patch = (id: string, data: Record<string, unknown>): CanvasCommand => ({
+    type: 'MERGE_NODE_DATA',
+    patches: [{ nodeId: id as `node-${string}`, patch: data }],
+  });
+  const settle = () => vi.advanceTimersByTimeAsync(5_000);
+
+  beforeEach(() => {
+    const nodes = seedNodeOrder([...state().nodes, pdf]);
+    server.reset(nodes, [], 1);
+    state()._setStateRaw({ nodes });
+  });
+
+  it.each<[string, () => void]>([
+    [
+      'a Grid cell change',
+      () => state().executeCommands([patch(PDF, { frameColumn: 1 })]),
+    ],
+    [
+      'a rename',
+      () => state().executeCommands([patch(PDF, { label: 'Renamed' })]),
+    ],
+    [
+      'a new source',
+      () =>
+        state().executeCommands([patch(PDF, { src: 'artifact-other.pdf' })]),
+    ],
+    [
+      'a layer change',
+      () =>
+        state().executeCommands([
+          {
+            type: 'REORDER_NODES',
+            nodeIds: [X as `node-${string}`],
+            to: 'top',
+          },
+        ]),
+    ],
+    [
+      'a place in a Column track',
+      () =>
+        state().executeCommands([
+          patch(PDF, { frameColumn: 1, trackKey: 'a5' }),
+        ]),
+    ],
+    [
+      'a created node',
+      () =>
+        state().executeCommands([
+          {
+            type: 'CREATE_NODES',
+            nodes: [
+              {
+                id: 'node-sync-new',
+                nodeType: 'web',
+                position: { x: 0, y: 900 },
+                data: { src: 'https://example.com/a' },
+              },
+            ],
+          },
+        ]),
+    ],
+    [
+      "an agent's rename",
+      () =>
+        void deliver(remote([patch(PDF, { label: 'Agent title' })]), 'agent'),
+    ],
+  ])('%s', async (_name, act) => {
+    act();
+    for (let index = 0; index < own.length; index++) await answer(index);
+    await settle();
+    expect(state().ingestionByNodeId).toEqual({});
   });
 });

@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { restoreChanged } from '../historyRestore';
-import { edgeKey, EXISTENCE_UNIT, nodeUnitKey, orderKey } from '../inFlight';
+import { edgeKey, EXISTENCE_UNIT, nodeUnitKey } from '../inFlight';
 
 import type { UnitNode } from '../propertyUnits';
 
@@ -15,6 +15,10 @@ const node = (id: string, x: number, extra: Partial<N> = {}): N => ({
   data: { style: { accent: 'white' } },
   ...extra,
 });
+/** A node carrying its paint key, as every node a page loads does. */
+const keyed = (id: string, paintKey: string, extra: Partial<N> = {}): N =>
+  node(id, 0, { ...extra, data: { paintKey } });
+const PAINT_UNIT = 'data.paintKey';
 const ids = (nodes: readonly UnitNode[]) => nodes.map((n) => n.id);
 
 describe('restoreChanged', () => {
@@ -66,45 +70,85 @@ describe('restoreChanged', () => {
     expect(result.edges).toEqual([edge]);
   });
 
-  it('restores sibling order around nodes the snapshot does not know', () => {
+  it("restores a node's place in the order around nodes the snapshot does not know", () => {
     const snapshot = {
-      nodes: [node('a', 0), node('b', 0), node('c', 0)],
+      nodes: [keyed('a', 'a0'), keyed('b', 'a1'), keyed('c', 'a2')],
       edges: [],
     };
+    // This page sent `c` to the back; another page added `new` since,
+    // between `a` and `b`.
     const current = {
-      nodes: [node('c', 0), node('a', 0), node('new', 0), node('b', 0)],
+      nodes: [
+        keyed('c', 'Zz'),
+        keyed('a', 'a0'),
+        keyed('new', 'a0V'),
+        keyed('b', 'a1'),
+      ],
       edges: [],
     };
-    const result = restoreChanged(current, snapshot, new Set([orderKey(null)]));
-    expect(ids(result.nodes)).toEqual(['a', 'b', 'c', 'new']);
+    const result = restoreChanged(
+      current,
+      snapshot,
+      new Set([nodeUnitKey('c', PAINT_UNIT)]),
+    );
+    expect(ids(result.nodes)).toEqual(['a', 'new', 'b', 'c']);
+    expect(
+      result.nodes.map((n) => (n.data as { paintKey?: string }).paintKey),
+    ).toEqual(['a0', 'a0V', 'a1', 'a2']);
+  });
+
+  it("restores only the node it names, not another page's later reorder of a sibling", () => {
+    const snapshot = {
+      nodes: [keyed('a', 'a0'), keyed('b', 'a1'), keyed('c', 'a2')],
+      edges: [],
+    };
+    // This page brought `a` to the front; another page then sent `c` to
+    // the back.
+    const current = {
+      nodes: [keyed('c', 'Zz'), keyed('b', 'a1'), keyed('a', 'a3')],
+      edges: [],
+    };
+    const result = restoreChanged(
+      current,
+      snapshot,
+      new Set([nodeUnitKey('a', PAINT_UNIT)]),
+    );
+    expect(ids(result.nodes)).toEqual(['c', 'a', 'b']);
   });
 
   it("reorders one parent without moving another parent's children", () => {
-    const child = (id: string, parentId: string) => node(id, 0, { parentId });
+    const child = (id: string, parentId: string, paintKey: string) =>
+      keyed(id, paintKey, { parentId });
     const snapshot = {
       nodes: [
-        node('f', 0),
-        node('g', 0),
-        child('a', 'f'),
-        child('b', 'f'),
-        child('p', 'g'),
-        child('q', 'g'),
+        keyed('f', 'a0'),
+        keyed('g', 'a1'),
+        child('a', 'f', 'a0'),
+        child('b', 'f', 'a1'),
+        child('p', 'g', 'a0'),
+        child('q', 'g', 'a1'),
       ],
       edges: [],
     };
+    // Both parents' children were swapped since; only `a` is this page's.
     const current = {
       nodes: [
-        node('f', 0),
-        node('g', 0),
-        child('b', 'f'),
-        child('q', 'g'),
-        child('a', 'f'),
-        child('p', 'g'),
+        keyed('f', 'a0'),
+        child('b', 'f', 'a1'),
+        child('a', 'f', 'a2'),
+        keyed('g', 'a1'),
+        child('q', 'g', 'a1'),
+        child('p', 'g', 'a2'),
       ],
       edges: [],
     };
-    const result = restoreChanged(current, snapshot, new Set([orderKey('f')]));
-    expect(ids(result.nodes)).toEqual(['f', 'g', 'a', 'q', 'b', 'p']);
+    const result = restoreChanged(
+      current,
+      snapshot,
+      new Set([nodeUnitKey('a', PAINT_UNIT)]),
+    );
+    // Each parent is followed by its own children, in key order.
+    expect(ids(result.nodes)).toEqual(['f', 'a', 'b', 'g', 'q', 'p']);
   });
 
   it('does not restore a node into a parent another page removed', () => {

@@ -37,7 +37,7 @@ import { existsSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import path from 'node:path';
 
-import archiver from 'archiver';
+import { ZipArchive } from 'archiver';
 
 import {
   AGENT_HOST_SSE_EVENTS,
@@ -688,7 +688,7 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
       .header('Cache-Control', 'private, max-age=300')
       .header('Content-Disposition', `attachment; filename="${filename}"`)
       .type('application/zip');
-    const archive = archiver('zip', { zlib: { level: 6 } });
+    const archive = new ZipArchive({ zlib: { level: 6 } });
     archive.on('warning', (error) => {
       request.log.warn(
         { err: error, serviceId: service.manifest.id },

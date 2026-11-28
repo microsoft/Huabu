@@ -27,6 +27,7 @@ import { persist } from './persist.js';
 import canvasRoutes from '../../canvas/canvas.route.js';
 import { getStructuredStore } from '../../storage/index.js';
 import { setWorkspacePath } from '../../workspace.js';
+import { PreprocessDispatcher } from '../dispatcher.js';
 
 import type { NodeContent, SpaceNodes } from '../../storage/index.js';
 import type { NormalizeResult } from '../types.js';
@@ -343,7 +344,7 @@ describe('persist — video source fence', () => {
     expect(result.videoCover).toBeUndefined();
   });
 
-  it('returns only persisted cover refs through the real preprocess HTTP response', async () => {
+  it('returns the cover refs it persisted', async () => {
     const nodes = await video();
     const current = await nodes.read('v');
     if (!current) throw new Error('Missing video fixture');
@@ -354,29 +355,22 @@ describe('persist — video source fence', () => {
         headers: { 'content-type': 'image/jpeg' },
       }),
     );
-    const app = fastify();
-    await app.register(canvasRoutes, { prefix: '/canvas' });
     try {
-      const response = await app.inject({
-        method: 'POST',
-        url: '/canvas/video-space/nodes/v/preprocess',
-        payload: {
-          nodeType: 'video',
-          snapshot: { src },
-          options: { allowLLM: false },
-        },
+      const result = await new PreprocessDispatcher().preprocess({
+        canvasId: 'video-space',
+        nodeId: 'v',
+        nodeType: 'video',
+        snapshot: { src },
       });
-      expect(response.statusCode).toBe(200);
       const saved = (await nodes.read('v'))?.record;
-      expect(response.json()).toMatchObject({
-        success: true,
+      expect(result.success).toBe(true);
+      expect(result.patch).toMatchObject({
         coverUrl: saved?.coverUrl,
         coverSourceSrc: src,
       });
       expect(saved?.coverUrl).toMatch(/^cover_[\w-]+\.jpg$/);
     } finally {
       fetch.mockRestore();
-      await app.close();
     }
   });
 });

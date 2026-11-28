@@ -21,7 +21,10 @@ import { isMac } from '@/utils/platform';
 
 import { NotePreview } from './NotePreview';
 
-vi.mock('@/hooks/useElectron', () => ({ isElectron: vi.fn() }));
+vi.mock(import('@/hooks/useElectron'), async (importOriginal) => ({
+  ...(await importOriginal()),
+  isElectron: vi.fn(),
+}));
 
 (
   globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }

@@ -260,7 +260,6 @@ async function applyConversationOwnerPatch(
       response.toVersion,
       response.pendingEffects,
       false,
-      undefined,
       response.nodeContentRevisions
         ? { nodeContentRevisions: response.nodeContentRevisions }
         : undefined,

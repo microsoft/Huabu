@@ -387,6 +387,26 @@ export interface BaseNodeData {
    */
   frameColumn?: number;
   /**
+   * Paint order among the children of this node's parent (the root
+   * included): a higher key paints further in front. An order key
+   * (`canvas-engine/orderKey.ts`), so one node can be moved between two
+   * others by writing this node alone. Equal keys order by node id.
+   *
+   * Written by the engine only — after a command that created the node,
+   * changed its parent or reordered it. The `nodes` array is
+   * kept in this order; it is derived from the keys, not the other way
+   * round.
+   */
+  paintKey?: string;
+  /**
+   * Reading order inside this node's track of a parent Frame laid out in
+   * `column` or `row` mode: an order key, compared with the other children
+   * of the same track ({@link frameColumn} / {@link frameRow}). A child
+   * without one is placed by its coordinate and keyed by the relayout.
+   * Dropped when the node changes parent or the Frame changes mode.
+   */
+  trackKey?: string;
+  /**
    * Row index inside a parent Frame laid out in `row` or `grid` mode.
    * Ignored by `free` and `column` layouts and by root-level nodes. See
    * {@link frameColumn} for how the two combine.
@@ -652,8 +672,6 @@ export const FRAME_GRID_DEFAULT_COUNT = 1;
 
 /** Frame node: container for grouping other nodes */
 export interface FrameNodeData extends BaseNodeData {
-  /** Direct child IDs per numeric masonry track, separate from sibling paint order. */
-  layoutOrder?: string[][];
   type: 'frame';
   /** Layout mode applied to direct children. Defaults to `'free'`. */
   layoutMode?: FrameLayoutMode;

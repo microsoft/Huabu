@@ -7,34 +7,27 @@ import { useHistoryToolDetails } from '@/hooks/useHistoryToolDetails';
 
 import { Button } from '../Common/Button';
 
-/** Mounting or expanding this placeholder never starts a request. */
+/** Loads on mount: callers render it only inside a row the user expanded. */
 export function DeferredDetails({ turnRef }: { turnRef: string }) {
   const { t } = useTranslation();
-  const { status, load } = useHistoryToolDetails(turnRef);
+  const { status, retry } = useHistoryToolDetails(turnRef);
   return (
     <div
       className="text-fg-muted px-2 py-1 text-xs"
       aria-busy={status === 'loading'}
     >
-      {status === 'error' && (
-        <p role="alert" className="text-danger">
-          {t('messages.detailsLoadFailed')}
-        </p>
+      {status === 'loading' ? (
+        <p>{t('messages.detailsLoading')}</p>
+      ) : (
+        <>
+          <p role="alert" className="text-danger">
+            {t('messages.detailsLoadFailed')}
+          </p>
+          <Button variant="ghost" size="sm" onClick={retry}>
+            {t('messages.retry')}
+          </Button>
+        </>
       )}
-      <Button
-        variant="ghost"
-        size="sm"
-        disabled={status === 'loading'}
-        onClick={() => void load()}
-      >
-        {t(
-          status === 'loading'
-            ? 'messages.detailsLoading'
-            : status === 'error'
-              ? 'messages.retry'
-              : 'messages.seeMore',
-        )}
-      </Button>
     </div>
   );
 }

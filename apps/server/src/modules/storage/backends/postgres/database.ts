@@ -112,7 +112,8 @@ export class PostgresStoreContext {
         if (migration.version <= version) continue;
         if (migration.version !== version + 1)
           throw new Error('Postgres migrations must be contiguous');
-        await client.query(migration.sql);
+        if (migration.sql) await client.query(migration.sql);
+        if ('data' in migration) await migration.data(client);
         await client.query(
           'UPDATE huabu_schema_version SET version = $1 WHERE id = 1',
           [migration.version],

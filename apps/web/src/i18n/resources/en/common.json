@@ -78,7 +78,24 @@
     "label": "Open Spaces",
     "newTab": "New tab",
     "noMatchingSpaces": "No matching Spaces.",
-    "closeTab": "Close Tab"
+    "closeTab": "Close Tab",
+    "unseen": "Conversations with something you have not seen: {{count}}"
+  },
+  "attention": {
+    "done": "Finished, not seen yet",
+    "error": "Failed",
+    "approval": "Waiting for your approval"
+  },
+  "unseenChanges": {
+    "create": "{{conversation}} · created",
+    "update": "{{conversation}} · changed",
+    "open": "Click to open the conversation"
+  },
+  "turnNotices": {
+    "done": "Finished",
+    "error": "Failed",
+    "approval": "Waiting for your approval",
+    "several": "{{count}} conversations have news"
   },
   "sigil": {
     "chooseResource": "Choose a resource",
@@ -471,6 +488,11 @@
     "showMiniMap": "Show MiniMap",
     "hideMiniMap": "Hide MiniMap",
     "miniMapDescription": "Display an overview of the Space in the bottom-right corner.",
+    "notifyTurnDone": "Notify when an Agent finishes",
+    "notifyTurnDoneDescription": "Show a system notification when a turn ends in a Space you are not looking at.",
+    "notifyNeedsYou": "Notify when an Agent needs you",
+    "notifyNeedsYouDescription": "Show a system notification when an Agent fails or waits for your approval in a Space you are not looking at.",
+    "turnNoticesBlocked": "The browser does not allow notifications from this page. Allow them in the browser settings first.",
     "worldCanvas": "World Canvas",
     "worldCanvasDescription": "Use World as the workspace landing page and show Space shortcuts.",
     "showWorldCanvas": "Show World Canvas",
@@ -1120,6 +1142,7 @@
     "noPdfSource": "No PDF Source",
     "noCanvasToSave": "No Space to save into",
     "uploadFailed": "Upload failed",
+    "unsupportedFileType": "Unsupported file type: {{names}}",
     "micBlocked": "Mic blocked: {{message}}",
     "microphoneAccessDenied": "Microphone access denied",
     "audioFileMissing": "Audio file missing",
@@ -1237,6 +1260,12 @@
     "workingDirectorySinglePath": "Enter a single directory path.",
     "workingDirectoryOverride": "Working directory override",
     "historyLoadFailed": "Failed to load conversation history",
+    "historyRefreshFailed": "Failed to refresh conversation history",
+    "historyTurnNotSaved": "The completed turn is not available in history yet. Your messages are kept.",
+    "historyPageFailed": "Failed to load this part of the history",
+    "olderHistoryFailed": "Failed to load earlier turns",
+    "historyChanged": "History changed. Reload the conversation to continue.",
+    "historyReloadBusy": "Finish the current turn before reloading the history.",
     "workingDirectoryOverrideDescription": "Optionally use a different directory for this conversation.",
     "workingDirectoryOverrideActive": "Conversation working directory: {{path}}",
     "workingDirectoryOverrideInherited": "Working directory inherited from Profile: {{path}}",
@@ -1288,6 +1317,7 @@
     "newTemporaryConversation": "New temporary chat",
     "newConversationOptions": "Conversation creation options",
     "titleSaveFailed": "Could not sync conversation title",
+    "agentSessionLoadFailed": "Could not load {{agent}} session information",
     "retryTitleSave": "Retry title save",
     "renameTitle": "Rename conversation",
     "newChatWith": "New chat with {{name}}",
@@ -1421,7 +1451,6 @@
     "partialStrokeCount_other": "{{count}} strokes"
   },
   "messages": {
-    "seeMore": "See more",
     "detailsLoading": "Loading details…",
     "detailsLoadFailed": "Could not load details.",
     "listLabel": "Conversation messages",
@@ -1489,6 +1518,7 @@
     "activityErrorSteps_other": "Error · {{count}} steps",
     "activityFilesChanged_one": "Changed {{count}} file",
     "activityFilesChanged_other": "Changed {{count}} files",
+    "openFile": "Open {{path}}",
     "plan": "Plan",
     "copyPlan": "Copy plan",
     "copyPlanMarkdown": "Copy plan as markdown checklist",
@@ -1830,10 +1860,25 @@
     "intro": "Who may use this Huabu, and which Workspaces they can open. People appear here after they first sign in. Changes apply on their next request.",
     "serviceAccess": "Service access",
     "accessVsWorkspace": "Service access lets someone use this Huabu; anyone admitted without a Workspace gets a personal one. Adding someone to a Workspace does not turn on Service access, and they join it as a Viewer until you choose Editor or Owner.",
+    "admission": {
+      "title": "Automatic admission",
+      "description": "Admit anyone who signs in with {{providers}} as an ordinary member. Anyone without a Workspace they can open gets a personal one. Automatic admission never makes them administrators or adds them to existing Workspaces.",
+      "provider": {
+        "entra": "Microsoft Entra ID (only the tenants configured here)",
+        "auth0": "Auth0 (anyone its sign-in accepts)"
+      },
+      "providerSeparator": " or ",
+      "noProviders": "Automatic admission applies to Microsoft Entra ID and Auth0 sign-in, and neither is configured here.",
+      "keepsRemoved": "People you remove stay out until you turn their access back on. Turning off automatic admission removes nobody.",
+      "loadFailed": "Could not load the automatic admission setting. Reopen People to try again."
+    },
     "status": {
       "administrator": "Administrator",
       "admitted": "Has access",
-      "waiting": "Waiting for access"
+      "waiting": "Waiting for access",
+      "blocked": "Access removed",
+      "noAccess": "No access",
+      "joinedAutomatically": "Joined automatically"
     },
     "roleIn": "Role in {{workspace}}",
     "removeRole": "Remove from this Workspace",

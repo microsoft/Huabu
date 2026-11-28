@@ -8,6 +8,7 @@ import {
   moveNodeIntoFrame,
   moveNodeOutOfFrame,
   planStructuredDrop,
+  settleTrackKeys,
   withMasonryLayoutOrder,
   readFrameGridConfig,
   readFrameGridRow,
@@ -168,6 +169,10 @@ export default function resolveNodeDragStop(
     });
   }
 
+  // A node that changed Frame left its place in the old Frame's track
+  // behind, as it will when the engine runs the commands built below.
+  result = settleTrackKeys(result, nodes);
+
   // Collect parent changes first. Geometry is diffed only after affected Hug
   // Frames have fitted, so the batch includes the fitted Frame and child
   // coordinates rather than the intermediate reparent geometry.
@@ -211,8 +216,13 @@ export default function resolveNodeDragStop(
 
   let placed = applyPendingMutations(result, dropOutcome);
   const movedIds = new Set<string>(intent.draggedNodeIds);
+  // Nodes dragged together stay adjacent in a track's reading order, whether
+  // they enter a Frame or are repositioned inside it.
   for (const frameId of affectedFrameIds) {
-    placed = withMasonryLayoutOrder(placed, frameId, movedIds, ui.edges);
+    placed = withMasonryLayoutOrder(placed, frameId, movedIds, ui.edges, {
+      ids: movedIds,
+      previous: nodes,
+    });
   }
   // Resolve destination cells before reflow can replace the live insertion coordinate.
   const projection = projectAffectedFrameGeometry(

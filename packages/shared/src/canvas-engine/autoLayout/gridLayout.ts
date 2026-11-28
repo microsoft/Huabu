@@ -31,7 +31,12 @@
  * That is the only thing standing between "switch the layout mode" and
  * "scatter the arrangement the user built".
  */
-import { orderTrack, readLayoutOrder, sameLayoutOrder } from './layoutOrder.js';
+import {
+  orderTrack,
+  readTrackKey,
+  trackKeyChanges,
+  trackOrderRanks,
+} from './layoutOrder.js';
 import { EDGE_LABEL_MAX_INVERSE_SCALE } from '../../types/canvas/edge.js';
 import {
   FRAME_GRID_DEFAULT_COUNT,
@@ -606,6 +611,8 @@ export interface StructuredGutterPlan {
 export interface StructuredLayoutOptions {
   /** Pointer placement only: these members re-enter the stored order at their live coordinates. */
   masonryMovedNodeIds?: ReadonlySet<string>;
+  /** Moved members that enter a track as one contiguous block rather than one by one. */
+  masonryBlockNodeIds?: ReadonlySet<string>;
   edges?: readonly Edge[];
   /** Insets shared by the resize inverse and its forward layout. */
   responsiveMetrics?: FrameResponsiveMetrics;
@@ -755,11 +762,12 @@ export function applyColumnLayout(
   const frame = nodes.find((n) => n.id === frameId);
   if (!frame || frame.type !== 'frame' || isLocked(frame)) return null;
 
+  const orderRanks = masonryOrderRanks(nodes, frameId, 'column', options);
   const children = orderTrack(
     collectChildren(nodes, frameId),
     (item) => item.node.id,
     (item) => item.node.position.y,
-    masonryOrderRanks(frame, options),
+    orderRanks,
   );
   if (children.length === 0) return null;
 
@@ -787,7 +795,6 @@ export function applyColumnLayout(
     'column',
   );
 
-  const orderRanks = masonryOrderRanks(frame, options);
   const colItems: ChildSlot[][] = Array.from(
     { length: effectiveCols },
     () => [],
@@ -802,6 +809,7 @@ export function applyColumnLayout(
       (item) => item.node.id,
       (item) => item.node.position.y,
       orderRanks,
+      options.masonryBlockNodeIds,
     );
   }
 
@@ -898,11 +906,12 @@ export function applyRowLayout(
   const frame = nodes.find((n) => n.id === frameId);
   if (!frame || frame.type !== 'frame' || isLocked(frame)) return null;
 
+  const orderRanks = masonryOrderRanks(nodes, frameId, 'row', options);
   const children = orderTrack(
     collectChildren(nodes, frameId),
     (item) => item.node.id,
     (item) => item.node.position.x,
-    masonryOrderRanks(frame, options),
+    orderRanks,
   );
   if (children.length === 0) return null;
 
@@ -938,13 +947,13 @@ export function applyRowLayout(
     const slot = assignment.get(child.node.id) ?? 0;
     rowItems[slot].push(child);
   }
-  const orderRanks = masonryOrderRanks(frame, options);
   for (let i = 0; i < rowItems.length; i++) {
     rowItems[i] = orderTrack(
       rowItems[i],
       (item) => item.node.id,
       (item) => item.node.position.x,
       orderRanks,
+      options.masonryBlockNodeIds,
     );
   }
 
@@ -1581,7 +1590,7 @@ export interface StructuredDropZone {
    * onto the real nodes so peers slide aside under the cursor.
    */
   reflow: StructuredReflowEntry[];
-  /** All selected destinations for a grouped Grid move. */
+  /** Every dragged node's destination when several move together. */
   placements?: DraggedNodeRect[];
   context: StructuredDropContext;
 }
@@ -1595,18 +1604,18 @@ export interface StructuredReflowEntry {
 
 /**
  * Project a simulated layout onto the frame's *existing* children,
- * skipping the dragged node (React Flow owns its position mid-drag).
+ * skipping the dragged nodes (React Flow owns their positions mid-drag).
  */
 function collectReflowPositions(
   nodes: Node[],
   frameId: string,
-  draggedId: string | undefined,
+  draggedIds: ReadonlySet<string>,
   layout: FrameGridLayoutResult | null | undefined,
 ): StructuredReflowEntry[] {
   if (!layout) return [];
   const out: StructuredReflowEntry[] = [];
   for (const node of nodes) {
-    if (node.parentId !== frameId || node.id === draggedId) continue;
+    if (node.parentId !== frameId || draggedIds.has(node.id)) continue;
     const next = layout.childPositions.get(node.id);
     if (!next) continue;
     out.push({ id: node.id, x: next.x, y: next.y });
@@ -2042,8 +2051,11 @@ function describeGridDropZone(
     width: dragged.width,
     height: dragged.height,
     frameSize: layout.frameSize,
-    reflow: collectReflowPositions(nodes, frameId, dragged.id, layout).filter(
-      (entry) => !movingIds.has(entry.id),
+    reflow: collectReflowPositions(
+      nodes,
+      frameId,
+      new Set([dragged.id, ...movingIds]),
+      layout,
     ),
     ...(requests.length > 1
       ? {
@@ -2106,6 +2118,12 @@ export function describeStructuredDropZone(
     target?: StructuredDropTarget;
     rowTarget?: StructuredDropTarget;
     requests?: readonly StructuredDropRequest[];
+    /**
+     * Column / Row only: frame-local rects of the other nodes dragged
+     * with `dragged` that land in this Frame too. They join the same
+     * track and are ordered with it exactly as the commit orders them.
+     */
+    companions?: readonly DraggedNodeRect[];
   } = {},
 ): StructuredDropZone | null {
   const frame = nodes.find((n) => n.id === frameId);
@@ -2141,7 +2159,6 @@ export function describeStructuredDropZone(
   const trackAxis: FrameAxis = isCol ? 'column' : 'row';
   const trackField = isCol ? 'frameColumn' : 'frameRow';
 
-  let foundDragged = false;
   // Demote exactly as the commit path does, so a frame already at the
   // maximum track count never previews a break it cannot honour.
   const opensTrack =
@@ -2150,6 +2167,10 @@ export function describeStructuredDropZone(
   const targetSlot = opensTrack
     ? target.slot
     : Math.min(target.slot, count - 1);
+  const moved = new Map(
+    [dragged, ...(options.companions ?? [])].map((rect) => [rect.id, rect]),
+  );
+  const found = new Set<string>();
   const simulated = nodes.map((node) => {
     if (node.id === frameId && effectiveCount !== count) {
       return {
@@ -2157,15 +2178,16 @@ export function describeStructuredDropZone(
         data: { ...node.data, gridCount: effectiveCount },
       };
     }
-    if (node.id === dragged.id) {
-      foundDragged = true;
+    const rect = moved.get(node.id);
+    if (rect) {
+      found.add(node.id);
       return {
         ...node,
         parentId: frameId,
-        position: { x: dragged.x, y: dragged.y },
+        position: { x: rect.x, y: rect.y },
         data: { ...node.data, [trackField]: targetSlot },
-        style: { ...node.style, width: dragged.width, height: dragged.height },
-        measured: { width: dragged.width, height: dragged.height },
+        style: { ...node.style, width: rect.width, height: rect.height },
+        measured: { width: rect.width, height: rect.height },
       };
     }
     if (!opensTrack || node.parentId !== frameId) {
@@ -2176,25 +2198,37 @@ export function describeStructuredDropZone(
       ? node
       : { ...node, data: { ...node.data, [trackField]: slot + 1 } };
   });
-  if (!foundDragged) {
+  for (const rect of moved.values()) {
+    if (found.has(rect.id)) continue;
     simulated.push({
-      id: dragged.id,
+      id: rect.id,
       type: 'text',
       parentId: frameId,
-      position: { x: dragged.x, y: dragged.y },
+      position: { x: rect.x, y: rect.y },
       data: { [trackField]: targetSlot },
-      style: { width: dragged.width, height: dragged.height },
-      measured: { width: dragged.width, height: dragged.height },
+      style: { width: rect.width, height: rect.height },
+      measured: { width: rect.width, height: rect.height },
     } as Node);
   }
-  const simulatedLayout = solveStructuredFrameLayout(
+  // Reading order comes from the same solve the commit makes, so the
+  // footprints drawn here are the ones the release will produce.
+  const movedIds = new Set(moved.keys());
+  const simulatedLayout = solveMasonryPlacement(
     simulated,
     frameId,
-    'compact',
-    { ...options, masonryMovedNodeIds: new Set([dragged.id]) },
+    movedIds,
+    { ids: movedIds, previous: nodes },
+    options,
   );
   const position = simulatedLayout?.childPositions.get(dragged.id);
   if (!simulatedLayout || !position) return null;
+  const placements =
+    moved.size > 1
+      ? [...moved.values()].flatMap((rect) => {
+          const next = simulatedLayout.childPositions.get(rect.id);
+          return next ? [{ ...rect, x: next.x, y: next.y }] : [];
+        })
+      : undefined;
 
   const bands = describeTrackBands(simulatedLayout, axis);
 
@@ -2205,7 +2239,8 @@ export function describeStructuredDropZone(
     width: dragged.width,
     height: dragged.height,
     frameSize: simulatedLayout.frameSize,
-    reflow: collectReflowPositions(nodes, frameId, dragged.id, simulatedLayout),
+    reflow: collectReflowPositions(nodes, frameId, movedIds, simulatedLayout),
+    ...(placements ? { placements } : {}),
     context: {
       axis,
       tracks: bands.tracks,
@@ -2311,21 +2346,7 @@ export function applyStructuredFrameRelayout(
       policy,
       layoutOptions,
     );
-    if (!result) {
-      if (
-        frame &&
-        (cfg.axis === 'column' || cfg.axis === 'row') &&
-        !working.some((node) => node.parentId === frameId) &&
-        !sameLayoutOrder(readLayoutOrder(frame.data), [])
-      ) {
-        working = working.map((node) =>
-          node.id === frameId
-            ? { ...node, data: { ...node.data, layoutOrder: [] } }
-            : node,
-        );
-      }
-      continue;
-    }
+    if (!result) continue;
 
     handled.add(frameId);
 
@@ -2341,6 +2362,14 @@ export function applyStructuredFrameRelayout(
     //                trade-off for unlocking `column|row + manual`.
     const sizing = getFrameSizing(frame);
     const writeFrameSize = sizing === 'hug';
+    // Column / Row reading order is stored on the children: only a child
+    // that has no key for the place the solver read it in gets one.
+    const trackKeys = result.layoutOrder
+      ? trackKeyChanges(
+          result.layoutOrder,
+          new Map(working.map((node) => [node.id, node])),
+        )
+      : new Map<string, string>();
 
     working = working.map((n) => {
       // Frame itself — for `hug`, write content-driven size into both
@@ -2357,16 +2386,12 @@ export function applyStructuredFrameRelayout(
         const gridChanged =
           (prevData as { gridCount?: number }).gridCount !==
           result.effectiveCount;
-        const orderChanged =
-          result.layoutOrder !== undefined &&
-          !sameLayoutOrder(readLayoutOrder(prevData), result.layoutOrder);
         const nextData = {
           ...prevData,
           gridCount: result.effectiveCount,
-          ...(result.layoutOrder ? { layoutOrder: result.layoutOrder } : {}),
         };
         if (!writeFrameSize) {
-          if (!gridChanged && !orderChanged) return n;
+          if (!gridChanged) return n;
           return {
             ...n,
             data: nextData,
@@ -2374,7 +2399,7 @@ export function applyStructuredFrameRelayout(
         }
         return {
           ...n,
-          ...(gridChanged || orderChanged ? { data: nextData } : {}),
+          ...(gridChanged ? { data: nextData } : {}),
           style: {
             ...(n.style ?? {}),
             width: result.frameSize.width,
@@ -2404,19 +2429,29 @@ export function applyStructuredFrameRelayout(
       // `slotChanged` because the value itself is usually unchanged —
       // it is the *field* that moves.
       const shedsLegacy = 'frameSlot' in dataRec;
+      const nextTrackKey = trackKeys.get(n.id);
       const posChanged =
         !!nextPos && (n.position.x !== nextPos.x || n.position.y !== nextPos.y);
       const slotChanged =
         typeof nextSlot === 'number' && priorSlot !== nextSlot;
       const rowChanged = typeof nextRow === 'number' && priorRow !== nextRow;
-      if (!posChanged && !slotChanged && !rowChanged && !shedsLegacy) return n;
-      const dataChanged = slotChanged || rowChanged || shedsLegacy;
+      if (
+        !posChanged &&
+        !slotChanged &&
+        !rowChanged &&
+        !shedsLegacy &&
+        nextTrackKey === undefined
+      )
+        return n;
+      const dataChanged =
+        slotChanged || rowChanged || shedsLegacy || nextTrackKey !== undefined;
       let nextData: Record<string, unknown> | undefined;
       if (dataChanged) {
         nextData = { ...dataRec };
         delete nextData.frameSlot;
         if (typeof nextSlot === 'number') nextData[trackField] = nextSlot;
         if (typeof nextRow === 'number') nextData.frameRow = nextRow;
+        if (nextTrackKey !== undefined) nextData.trackKey = nextTrackKey;
       }
       return {
         ...n,
@@ -2430,39 +2465,146 @@ export function applyStructuredFrameRelayout(
 }
 
 function masonryOrderRanks(
-  frame: Node,
+  nodes: Node[],
+  frameId: string,
+  axis: 'column' | 'row',
   options: StructuredLayoutOptions,
 ): Map<string, number> {
-  const order = readLayoutOrder(frame.data);
-  return new Map(
-    (order?.flat() ?? [])
-      .filter((id) => !options.masonryMovedNodeIds?.has(id))
-      .map((id, index) => [id, index]),
+  return trackOrderRanks(
+    nodes.filter((node) => node.parentId === frameId),
+    (child) => readFrameTrack(child, axis),
+    options.masonryMovedNodeIds,
   );
 }
 
-/** Capture reading order without changing geometry or enabling a storage migration. */
+/** Which moved nodes travel as one block, and the state their move is measured against. */
+export interface MasonryGather {
+  ids: ReadonlySet<string>;
+  /** The nodes as they stood before the move: parents, tracks and track keys. */
+  previous: readonly Node[];
+}
+
+/**
+ * Whether placing each of `gather.ids` by its own coordinate (`order`) leaves
+ * the Frame reading as it did: every gathered child was already keyed in the
+ * track it is in now, and no keyed child stands out of key order.
+ *
+ * "The track it is in now" is not its number. Emptying a track renumbers the
+ * ones after it, so a child that left track 0 for track 1 can carry 0 again.
+ * Tracks are the same only while the children that shared one still share
+ * one and no two tracks have become one.
+ */
+function keepsReadingOrder(
+  nodes: Node[],
+  frameId: string,
+  gather: MasonryGather,
+  order: FrameLayoutOrder,
+): boolean {
+  const frame = nodes.find((node) => node.id === frameId);
+  const axis = frame?.data.layoutMode === 'row' ? 'row' : 'column';
+  const before = new Map(gather.previous.map((node) => [node.id, node]));
+  const children = nodes.filter((node) => node.parentId === frameId);
+  const trackNow = new Map<number | undefined, number | undefined>();
+  const trackBefore = new Map<number | undefined, number | undefined>();
+  for (const child of children) {
+    const was = before.get(child.id);
+    if (was?.parentId !== frameId) {
+      if (gather.ids.has(child.id)) return false;
+      continue;
+    }
+    if (gather.ids.has(child.id) && readTrackKey(child) === undefined)
+      return false;
+    const from = readFrameTrack(was, axis);
+    const to = readFrameTrack(child, axis);
+    if (trackNow.has(from) ? trackNow.get(from) !== to : trackBefore.has(to))
+      return false;
+    trackNow.set(from, to);
+    trackBefore.set(to, from);
+  }
+  const ranks = trackOrderRanks(children, (child) =>
+    readFrameTrack(child, axis),
+  );
+  return order.every((track) => {
+    let last = -1;
+    return track.every((id) => {
+      const rank = ranks.get(id);
+      if (rank === undefined) return true;
+      if (rank < last) return false;
+      last = rank;
+      return true;
+    });
+  });
+}
+
+/**
+ * Solve a Column / Row Frame for a pointer placement. This is the single
+ * ordering rule behind both the live drop preview and the committed drop:
+ * `movedIds` are read by their live coordinate instead of their track key,
+ * and those also named in `gather.ids` enter each track as one contiguous
+ * block.
+ *
+ * A move that leaves every member in its own place is not a regrouping, so
+ * the block only forms once the move actually changes the reading order.
+ */
+function solveMasonryPlacement(
+  nodes: Node[],
+  frameId: string,
+  movedIds: ReadonlySet<string>,
+  gather: MasonryGather | undefined,
+  options: StructuredLayoutOptions = {},
+): FrameGridLayoutResult | null {
+  const solve = (block?: ReadonlySet<string>) =>
+    solveStructuredFrameLayout(nodes, frameId, 'compact', {
+      ...options,
+      masonryMovedNodeIds: movedIds,
+      masonryBlockNodeIds: block,
+    });
+  const individual = solve();
+  if (
+    !individual?.layoutOrder ||
+    !gather ||
+    gather.ids.size < 2 ||
+    keepsReadingOrder(nodes, frameId, gather, individual.layoutOrder)
+  )
+    return individual;
+  return solve(gather.ids);
+}
+
+/**
+ * Give the children of a Column / Row Frame their track keys in the order
+ * they read in now, without changing geometry. `movedIds` are read by their
+ * coordinate instead of their key: this is how a moved child takes its new
+ * place. `gather` makes nodes that were dragged together land as one block
+ * ({@link solveMasonryPlacement}).
+ */
 export function withMasonryLayoutOrder(
   nodes: Node[],
   frameId: string,
   movedIds: ReadonlySet<string> = new Set(),
   edges: readonly Edge[] = [],
+  gather?: MasonryGather,
 ): Node[] {
   const frame = nodes.find((node) => node.id === frameId);
   const mode = frame?.data.layoutMode;
   if (!frame || (mode !== 'column' && mode !== 'row')) return nodes;
-  const result = solveStructuredFrameLayout(nodes, frameId, 'compact', {
+  const order = solveMasonryPlacement(nodes, frameId, movedIds, gather, {
     edges,
-    masonryMovedNodeIds: movedIds,
-  });
-  const order = result?.layoutOrder;
-  if (!order || sameLayoutOrder(readLayoutOrder(frame.data), order))
-    return nodes;
-  return nodes.map((node) =>
-    node.id === frameId
-      ? { ...node, data: { ...node.data, layoutOrder: order } }
-      : node,
+  })?.layoutOrder;
+  if (!order) return nodes;
+  // A moved child reads where its coordinate puts it and is keyed for that
+  // place; the children it passed keep their keys.
+  const keys = trackKeyChanges(
+    order,
+    new Map(nodes.map((node) => [node.id, node])),
+    movedIds,
   );
+  if (keys.size === 0) return nodes;
+  return nodes.map((node) => {
+    const key = keys.get(node.id);
+    return key === undefined
+      ? node
+      : { ...node, data: { ...node.data, trackKey: key } };
+  });
 }
 
 export function describeFrameLayout(

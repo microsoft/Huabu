@@ -17,6 +17,7 @@ import { settleInkInterpretation } from '@huabu/shared/ink-interpretation';
 
 import { ApiError } from '@/api/_client';
 import { agentApi } from '@/api/agent';
+import { i18n } from '@/i18n';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
 import {
   HISTORY_PAGE_TURNS,
@@ -54,6 +55,7 @@ import {
   observeAgentTurnAcceptance,
   reconcileAgentTurnAfterReconnect,
   settleTurnInkInterpretation,
+  pauseAgentTurnQueueAfterFailure,
   settleAgentTurnQueue,
 } from './agentTurnController';
 import { handleStreamEvent } from './useAgentStream';
@@ -325,8 +327,9 @@ function applyLatestHistoryWindow(
       ? [
           message.role,
           message.content,
-          message.quotedComments,
-          message.attachments,
+          // A live message carries empty lists where history omits the field.
+          message.quotedComments?.length ? message.quotedComments : undefined,
+          message.attachments?.length ? message.attachments : undefined,
         ]
       : message.role === 'assistant'
         ? [message.role, message.segments]
@@ -395,10 +398,11 @@ function applyLatestHistoryWindow(
 
 export interface ChatHistoryWindow {
   loadOlderHistory: () => void;
-  retryHistory: () => void;
   loadHistoryPage: (page: ChatHistoryPage) => void;
+  /** A failed page refill or completed-turn refresh; visible history is kept. */
   historyPageError?: string;
-  retryHistoryPage: () => void;
+  /** The single retry for every history read failure, whichever one is showing. */
+  retryHistory: () => void;
   updateHistoryViewport: (ids: string[]) => void;
   isCurrentOwnerHistory: boolean;
 }
@@ -443,7 +447,6 @@ export function useChatHistory(
     },
     [threadId],
   );
-  const [refreshNonce, setRefreshNonce] = useState(0);
   const [pageFailure, setPageFailure] = useState<{
     threadId: string;
     message: string;
@@ -508,9 +511,7 @@ export function useChatHistory(
       thread?.isPreparing ||
       hasUnreconciledAgentTurn(ownerCanvasId, threadId)
     ) {
-      setRefreshError(
-        'History changed. Finish the current turn before retrying the history reload.',
-      );
+      setRefreshError(i18n.t('chat.historyReloadBusy'));
       return;
     }
     resetOnHydration.current = true;
@@ -741,14 +742,16 @@ export function useChatHistory(
         if (error instanceof ApiError && error.status === 409) {
           staleCursor.current = threadId;
         }
+        console.warn('[useChatHistory] older history load failed', error);
         useChatStore.getState().setHistoryPageState(threadId, {
           before: requestedBefore,
           hasOlder: true,
           loadingOlder: false,
-          error:
-            error instanceof Error
-              ? error.message
-              : 'Failed to load earlier turns',
+          error: i18n.t(
+            staleCursor.current === threadId
+              ? 'chat.historyChanged'
+              : 'chat.olderHistoryFailed',
+          ),
         });
       });
   }, [ownerCanvasId, threadId, reloadHistory]);
@@ -781,9 +784,7 @@ export function useChatHistory(
           const ids = new Set(messages.map((message) => message.id));
           if (page.messageIds.some((id) => !ids.has(id))) {
             staleCursor.current = threadId;
-            throw new Error(
-              'History page changed. Reload the conversation to continue.',
-            );
+            throw new Error('History page changed');
           }
           useChatStore.getState().refillHistoryPage(threadId, page, messages);
         })
@@ -794,10 +795,11 @@ export function useChatHistory(
           console.warn('[useChatHistory] page refill failed', error);
           setPageFailure({
             threadId,
-            message:
-              error instanceof Error
-                ? error.message
-                : 'Failed to load history page',
+            message: i18n.t(
+              staleCursor.current === threadId
+                ? 'chat.historyChanged'
+                : 'chat.historyPageFailed',
+            ),
           });
         })
         .finally(() => pendingPages.current.delete(page));
@@ -873,9 +875,8 @@ export function useChatHistory(
             await waitForRetry(delay, controller.signal);
             continue;
           }
-          throw new Error(
-            'The completed turn is not available in history yet. Your messages are retained; retry to refresh.',
-          );
+          setRefreshError(i18n.t('chat.historyTurnNotSaved'));
+          return;
         }
         applyLatestHistoryWindow(window, ownerCanvasId);
         return;
@@ -886,11 +887,7 @@ export function useChatHistory(
           '[useChatHistory] completed history refresh failed',
           error,
         );
-        setRefreshError(
-          error instanceof Error
-            ? error.message
-            : 'Failed to refresh completed history',
-        );
+        setRefreshError(i18n.t('chat.historyRefreshFailed'));
       }
     });
     return () => {
@@ -903,7 +900,6 @@ export function useChatHistory(
     ownerCanvasId,
     threadId,
     isHistoryLoaded,
-    refreshNonce,
     setRefreshError,
     ownerUnavailable,
   ]);
@@ -940,7 +936,6 @@ export function useChatHistory(
         setAttachAttempt((attempt) => attempt + 1),
       );
     }
-    let queueCompletedNormally = false;
     let retryInactive = false;
 
     const tryReconnect = async () => {
@@ -1021,7 +1016,10 @@ export function useChatHistory(
               if (cancelled) return;
               if (event.type === 'done') {
                 outcome = inkTurnOutcome(event.data.meta?.stopReason);
-                queueCompletedNormally = outcome === 'done';
+                // A known bad ending pauses the queue; a lost connection is
+                // not one.
+                if (outcome !== 'done')
+                  pauseAgentTurnQueueAfterFailure(ownerThreadId);
               }
               if (!streaming) {
                 streaming = true;
@@ -1043,7 +1041,7 @@ export function useChatHistory(
             onError: (err) => {
               if (cancelled) return;
               outcome = 'error';
-              queueCompletedNormally = false;
+              pauseAgentTurnQueueAfterFailure(ownerThreadId);
               settleTurnInkInterpretation(streamContext, 'error');
               addMessage(ownerThreadId, {
                 id: createId('status'),
@@ -1071,7 +1069,6 @@ export function useChatHistory(
         )
         .finally(() => clearInkInterpretationStream(streamContext));
 
-      if (result.status !== 'completed') queueCompletedNormally = false;
       if (result.status === 'inactive' && !cancelled) {
         retryInactive = ownerStatus === 'running';
         outcome = 'interrupted';
@@ -1098,7 +1095,6 @@ export function useChatHistory(
 
     void tryReconnect()
       .catch(async (error) => {
-        queueCompletedNormally = false;
         if (cancelled || claim.signal.aborted) return;
         console.error('[useChatHistory] reconnect failed', error);
         const ownerStillRunning = ownerStatus === 'running';
@@ -1124,10 +1120,7 @@ export function useChatHistory(
         claim.release();
         // A disposed observer must not settle a successor's queue.
         if (cancelled) return;
-        settleAgentTurnQueue(
-          { threadId: ownerThreadId, ownerCanvasId },
-          queueCompletedNormally,
-        );
+        settleAgentTurnQueue({ threadId: ownerThreadId, ownerCanvasId });
         if (retryInactive) {
           const delay =
             attachRetryDelayByThread.get(ownerThreadId) ??
@@ -1165,6 +1158,30 @@ export function useChatHistory(
     ownerUnavailable,
   ]);
 
+  // An owner seen running that then reports an error has failed. Pause in the
+  // same commit that releases the attachment, before a waiting queue can wake;
+  // the token keeps a stale snapshot of an older run from pausing a newer one.
+  const runningInvocation = useRef<{ threadId: string; token: string | null }>(
+    undefined,
+  );
+  useEffect(() => {
+    if (ownerUnavailable) return;
+    const token = ownerInvocationToken ?? null;
+    if (ownerStatus === 'running') {
+      runningInvocation.current = { threadId, token };
+      return;
+    }
+    const observed = runningInvocation.current;
+    if (
+      ownerStatus === 'error' &&
+      observed?.threadId === threadId &&
+      observed.token === token
+    ) {
+      pauseAgentTurnQueueAfterFailure(threadId);
+    }
+    runningInvocation.current = undefined;
+  }, [ownerStatus, ownerInvocationToken, threadId, ownerUnavailable]);
+
   useEffect(() => {
     if (
       ownerUnavailable ||
@@ -1174,8 +1191,7 @@ export function useChatHistory(
       !useChatStore.getState().threadsById[threadId]?.queuedTurns.length
     )
       return;
-    // A terminal owner snapshot is not proof of normal stream completion.
-    settleAgentTurnQueue({ threadId, ownerCanvasId }, false);
+    settleAgentTurnQueue({ threadId, ownerCanvasId });
   }, [
     ownerStatus,
     hydratedOwnerKey,
@@ -1186,24 +1202,31 @@ export function useChatHistory(
     ownerUnavailable,
   ]);
 
-  const retryHistory = useCallback(() => {
-    useChatStore.getState().setHistoryError(threadId, null);
-  }, [threadId]);
-
   return {
     updateHistoryViewport,
     loadOlderHistory,
-    retryHistory,
     loadHistoryPage,
     historyPageError:
       pageFailure?.threadId === threadId ? pageFailure.message : refreshError,
-    retryHistoryPage: () => {
-      if (staleCursor.current === threadId) {
+    retryHistory: () => {
+      const state = useChatStore.getState();
+      // A failed initial load reruns once its error clears.
+      if (state.threadsById[threadId]?.historyError) {
+        state.setHistoryError(threadId, null);
+        return;
+      }
+      // Repeating a refresh that history rejected would be rejected again, so
+      // an explicit retry takes the server's history as it stands.
+      if (staleCursor.current === threadId || refreshError) {
         reloadHistory();
         return;
       }
-      setPageFailure(undefined);
-      if (refreshError) setRefreshNonce((nonce) => nonce + 1);
+      // A cleared page failure lets the visible page request itself again.
+      if (pageFailure?.threadId === threadId) {
+        setPageFailure(undefined);
+        return;
+      }
+      loadOlderHistory();
     },
     isCurrentOwnerHistory:
       isHistoryLoaded && !historyError && hydratedOwnerKey === ownerHistoryKey,

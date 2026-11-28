@@ -310,11 +310,9 @@ async function openBoth(
   return { canvasId, a, b };
 }
 
-/** Requests a page made that are not presence reports or preprocessing. */
+/** Requests a page made that are not presence reports. */
 const writes = (device: Device) =>
-  device.calls.filter(
-    (call) => !call.includes('/presence') && !call.includes('/preprocess'),
-  );
+  device.calls.filter((call) => !call.includes('/presence'));
 
 /** The preview panel of one node. */
 const panel = (page: Page, id: string) =>

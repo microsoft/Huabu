@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { ATTENTION_COLOR } from '@/utils/attention';
+
 /**
  * Question node agent status the mark renders. `idle` (never asked) is handled
  * separately by callers; these five are the states that produce a visible
@@ -52,13 +54,17 @@ export function resolveQuestionBadgeChrome({
   // Any unviewed terminal outcome wants attention: a done-unread answer, an
   // (unviewed) error, or skipped-write conflicts.
   const needsAttention = isApproval || unread || hasConflict;
-  const attentionColor = isApproval
-    ? 'var(--warning)'
-    : isError
-      ? 'var(--danger)'
-      : hasConflict
-        ? 'var(--warning)'
-        : 'var(--success)';
+  // A conflict asks for the person's decision, as an approval does.
+  const attentionColor =
+    ATTENTION_COLOR[
+      isApproval
+        ? 'approval'
+        : isError
+          ? 'error'
+          : hasConflict
+            ? 'approval'
+            : 'done'
+    ];
 
   return {
     isOpen,

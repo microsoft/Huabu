@@ -28,11 +28,14 @@ interface ThreadChatInputProps extends Omit<
 > {
   children?: ReactNode;
   onSubmit: (event: React.FormEvent, mode: AgentMode, draft: string) => void;
+  /** The thread is not ready to send yet; submissions join the queue. */
+  deferSubmission?: boolean;
 }
 
 export function ThreadChatInput({
   children,
   onSubmit,
+  deferSubmission = false,
   ...props
 }: ThreadChatInputProps) {
   const session = useChatSession();
@@ -147,7 +150,10 @@ export function ThreadChatInput({
           queuedTurns.some((turn) => turn.status !== 'pending')
         }
         queueSubmission={
-          props.isStreaming || preparing || queuedTurns.length > 0
+          props.isStreaming ||
+          preparing ||
+          deferSubmission ||
+          queuedTurns.length > 0
         }
         value={draft}
         onChange={handleChange}

@@ -23,7 +23,7 @@ import type {
   PreprocessDiagnostic,
   ResolvedInput,
 } from '../types.js';
-import type { PreprocessNodeRequest } from '@huabu/shared';
+import type { PreprocessNodeRequest } from '../types.js';
 
 export type CacheCheckResult = { hit: boolean };
 
@@ -41,7 +41,6 @@ export async function tryCacheShortCircuit(
   diagnostics: PreprocessDiagnostic[],
   nodes: SpaceNodes,
 ): Promise<boolean> {
-  if (request.options?.force) return false;
   if (request.nodeType !== 'web' && request.nodeType !== 'pdf') return false;
 
   // Web nodes can be backed by either a remote URL (`normalizedUri`) or a

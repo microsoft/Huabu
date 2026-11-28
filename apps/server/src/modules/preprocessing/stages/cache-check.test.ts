@@ -7,7 +7,7 @@ import { tryCacheShortCircuit } from './cache-check.js';
 
 import type { SpaceNodes } from '../../storage/index.js';
 import type { PipelineContext, PreprocessDiagnostic } from '../types.js';
-import type { PreprocessNodeRequest } from '@huabu/shared';
+import type { PreprocessNodeRequest } from '../types.js';
 
 describe('tryCacheShortCircuit remote PDF migration', () => {
   it('does not reuse cached text while src is still a remote PDF URL', async () => {
@@ -16,7 +16,6 @@ describe('tryCacheShortCircuit remote PDF migration', () => {
       canvasId: 'canvas-test',
       nodeId: 'pdf-1',
       nodeType: 'pdf',
-      trigger: 'node_updated',
       snapshot: { src },
     };
     const ctx: PipelineContext = {};
@@ -45,7 +44,6 @@ describe('tryCacheShortCircuit remote PDF migration', () => {
       canvasId: 'canvas-test',
       nodeId: 'pdf-1',
       nodeType: 'pdf',
-      trigger: 'node_updated',
       snapshot: { src },
     };
     const ctx: PipelineContext = {};
@@ -88,7 +86,6 @@ describe('tryCacheShortCircuit remote PDF migration', () => {
       canvasId: 'canvas-test',
       nodeId: 'pdf-1',
       nodeType: 'pdf',
-      trigger: 'node_updated',
       snapshot: { src },
     };
     const ctx: PipelineContext = {};
@@ -126,7 +123,6 @@ describe('tryCacheShortCircuit remote PDF migration', () => {
       canvasId: 'canvas-test',
       nodeId: 'pdf-1',
       nodeType: 'pdf',
-      trigger: 'node_updated',
       snapshot: { src },
     };
     const ctx: PipelineContext = {};

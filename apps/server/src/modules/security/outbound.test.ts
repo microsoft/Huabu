@@ -3,11 +3,23 @@
 
 import { createServer } from 'node:http';
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
 
 import {
   isPublicAddress,
+  leavesThroughProxy,
   outboundFetch,
+  readBodyWithin,
+  ResponseTooLargeError,
   withPublicNetworkOnly,
 } from './outbound.js';
 import { resolveImageUrl } from '../agent/conversation/prompt/image-inlining.js';
@@ -32,6 +44,16 @@ beforeAll(async () => {
     if (request.url === '/hop') {
       response.writeHead(302, { Location: `http://127.0.0.1:${port}/` });
       return response.end();
+    }
+    if (request.url === '/endless') {
+      // No declared length: only reading can discover the size.
+      response.writeHead(200, { 'Content-Type': 'text/html' });
+      const chunk = Buffer.alloc(1024 * 1024, 'a');
+      const send = () => {
+        while (!response.destroyed && response.write(chunk));
+        if (!response.destroyed) response.once('drain', send);
+      };
+      return send();
     }
     if (request.url === '/image.png') {
       response.writeHead(200, { 'Content-Type': 'image/png' });
@@ -211,5 +233,344 @@ it('applies the same connection-time guard to member model discovery and inferen
       },
     });
     await expect(memberModelFetch(url)).rejects.toMatchObject(refusedByGuard);
+  });
+});
+
+describe('public-only deployment', () => {
+  const PROXY_NAMES = [
+    'HTTPS_PROXY',
+    'https_proxy',
+    'HTTP_PROXY',
+    'http_proxy',
+    'NO_PROXY',
+    'no_proxy',
+  ];
+  /** Every scheme leaves through a proxy; nothing is exempt. */
+  const useProxy = () => {
+    process.env.HTTP_PROXY = 'http://proxy.invalid:8080';
+    process.env.HTTPS_PROXY = 'http://proxy.invalid:8080';
+  };
+  let saved: Record<string, string | undefined>;
+  beforeEach(() => {
+    saved = Object.fromEntries(
+      ['HUABU_PUBLIC_NETWORK_ONLY', ...PROXY_NAMES].map((name) => [
+        name,
+        process.env[name],
+      ]),
+    );
+    for (const name of PROXY_NAMES) delete process.env[name];
+    process.env.HUABU_PUBLIC_NETWORK_ONLY = '1';
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    for (const [name, value] of Object.entries(saved))
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+  });
+
+  it('refuses the owner the Server network, by address, by name and by redirect', async () => {
+    const before = requests;
+    await expect(
+      outboundFetch(`http://127.0.0.1:${port}/`),
+    ).rejects.toMatchObject(refusedByGuard);
+    await expect(
+      outboundFetch(`http://localhost:${port}/`),
+    ).rejects.toMatchObject(refusedByGuard);
+    const loader = new WebLoader();
+    await expect(loader.load(`http://localhost:${port}/hop`)).rejects.toThrow();
+    expect(requests).toBe(before);
+  });
+
+  it('checks every hop itself when a proxy makes the connections', async () => {
+    useProxy();
+    const hops: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: URL, init: RequestInit) => {
+        hops.push(`${init.method} ${url}`);
+        expect(init.redirect).toBe('manual');
+        if (url.pathname === '/final') return new Response('public page');
+        return new Response(null, {
+          status: 302,
+          headers: {
+            Location:
+              url.pathname === '/inward'
+                ? `http://127.0.0.1:${port}/`
+                : 'http://93.184.215.14/final',
+          },
+        });
+      }),
+    );
+    const before = requests;
+
+    await expect(
+      outboundFetch(`http://127.0.0.1:${port}/`),
+    ).rejects.toMatchObject(refusedByGuard);
+    await expect(
+      outboundFetch(`http://localhost:${port}/`),
+    ).rejects.toMatchObject(refusedByGuard);
+    expect(hops).toEqual([]);
+
+    const response = await outboundFetch('http://93.184.215.14/start');
+    expect(await response.text()).toBe('public page');
+    await expect(
+      outboundFetch('http://93.184.215.14/inward'),
+    ).rejects.toMatchObject(refusedByGuard);
+    expect(hops).toEqual([
+      'GET http://93.184.215.14/start',
+      'GET http://93.184.215.14/final',
+      'GET http://93.184.215.14/inward',
+    ]);
+    expect(requests).toBe(before);
+  });
+
+  it('leaves an unresolved name to the proxy unless it is private by construction', async () => {
+    useProxy();
+    const proxied = vi.fn(async () => new Response('resolved by the proxy'));
+    vi.stubGlobal('fetch', proxied);
+    // Many networks resolve public names only at the proxy.
+    const response = await outboundFetch('http://unresolvable.invalid/');
+    expect(await response.text()).toBe('resolved by the proxy');
+    expect(proxied).toHaveBeenCalledTimes(1);
+    // A proxy may resolve names of its own network; these can only be that.
+    for (const host of [
+      'huabu-no-such-intranet-host',
+      'wiki.huabu-no-such.corp',
+      'build.huabu-no-such.internal',
+      'nas.huabu-no-such.lan',
+    ])
+      await expect(outboundFetch(`http://${host}/`)).rejects.toMatchObject(
+        refusedByGuard,
+      );
+    expect(proxied).toHaveBeenCalledTimes(1);
+  });
+
+  it('gives up the check before a proxied hop as soon as the caller does', async () => {
+    useProxy();
+    const proxied = vi.fn(async () => new Response('never sent'));
+    vi.stubGlobal('fetch', proxied);
+    const reason = new Error('The caller timed out');
+    await expect(
+      outboundFetch('http://example.com/', {
+        signal: AbortSignal.abort(reason),
+      }),
+    ).rejects.toBe(reason);
+    const controller = new AbortController();
+    const pending = outboundFetch('http://slow-to-resolve.example/', {
+      signal: controller.signal,
+    });
+    controller.abort(reason);
+    await expect(pending).rejects.toBe(reason);
+    expect(proxied).not.toHaveBeenCalled();
+  });
+
+  it('checks a hop that bypasses the proxy where its connection is made', async () => {
+    useProxy();
+    process.env.NO_PROXY = `localhost,127.0.0.1,exempt.example`;
+    const before = requests;
+    // Real fetches: the guarded dispatcher refuses these at connect time.
+    await expect(
+      outboundFetch(`http://localhost:${port}/`),
+    ).rejects.toMatchObject(refusedByGuard);
+    await expect(
+      outboundFetch(`http://127.0.0.1:${port}/hop`),
+    ).rejects.toMatchObject(refusedByGuard);
+    expect(requests).toBe(before);
+
+    const sent: { url: string; guarded: boolean }[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: URL, init: RequestInit & { dispatcher?: unknown }) => {
+        sent.push({ url: String(url), guarded: init.dispatcher !== undefined });
+        return url.pathname === '/start'
+          ? new Response(null, {
+              status: 302,
+              headers: { Location: 'http://exempt.example/next' },
+            })
+          : new Response('ok');
+      }),
+    );
+    await outboundFetch('http://93.184.215.14/start');
+    // The proxied hop is checked beforehand; the exempt one by its dispatcher.
+    expect(sent).toEqual([
+      { url: 'http://93.184.215.14/start', guarded: false },
+      { url: 'http://exempt.example/next', guarded: true },
+    ]);
+  });
+
+  it('guards a scheme that has no proxy of its own', async () => {
+    process.env.HTTPS_PROXY = 'http://proxy.invalid:8080';
+    const before = requests;
+    await expect(
+      outboundFetch(`http://localhost:${port}/`),
+    ).rejects.toMatchObject(refusedByGuard);
+    expect(requests).toBe(before);
+  });
+
+  it('drops credentials when a proxied redirect changes origin', async () => {
+    useProxy();
+    const seen: (string | null)[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: URL, init: RequestInit) => {
+        seen.push(new Headers(init.headers).get('authorization'));
+        return url.hostname === '93.184.215.14'
+          ? new Response(null, {
+              status: 307,
+              headers: { Location: 'http://8.8.8.8/' },
+            })
+          : new Response('ok');
+      }),
+    );
+    await outboundFetch('http://93.184.215.14/', {
+      headers: { Authorization: 'Bearer secret' },
+    });
+    expect(seen).toEqual(['Bearer secret', null]);
+  });
+
+  it('still connects member work directly behind a proxy', async () => {
+    useProxy();
+    const before = requests;
+    await expect(
+      withPublicNetworkOnly(() => outboundFetch(`http://127.0.0.1:${port}/`)),
+    ).rejects.toMatchObject(refusedByGuard);
+    expect(requests).toBe(before);
+  });
+});
+
+describe('bounded response bodies', () => {
+  it('returns a body within the limit', async () => {
+    const body = await readBodyWithin(new Response('hello'), 5);
+    expect(body.toString()).toBe('hello');
+    expect((await readBodyWithin(new Response(null), 5)).length).toBe(0);
+  });
+
+  it('refuses a declared length over the limit without reading', async () => {
+    const cancel = vi.fn();
+    const stream = new ReadableStream({
+      pull: () => {
+        throw new Error('The body must not be read');
+      },
+      cancel,
+    });
+    const response = new Response(stream, {
+      headers: { 'Content-Length': '6' },
+    });
+    await expect(readBodyWithin(response, 5)).rejects.toBeInstanceOf(
+      ResponseTooLargeError,
+    );
+    expect(cancel).toHaveBeenCalled();
+  });
+
+  it('abandons a body of undeclared length once it passes the limit', async () => {
+    const response = await outboundFetch(`http://127.0.0.1:${port}/endless`);
+    expect(response.headers.get('content-length')).toBeNull();
+    await expect(readBodyWithin(response, 3 * 1024 * 1024)).rejects.toThrow(
+      'exceeds 3145728 bytes',
+    );
+  });
+
+  it('keeps the web loader from buffering an endless page', async () => {
+    await expect(
+      new WebLoader().load(`http://127.0.0.1:${port}/endless`),
+    ).rejects.toThrow(/exceeds \d+ bytes/);
+  });
+
+  it('keeps a node-source download from buffering an endless file', async () => {
+    const opened = await mountTestWorkspace(
+      { structured: { kind: 'disk' }, blobs: { kind: 'disk' } },
+      'huabu-endless-import-',
+    );
+    try {
+      await opened.storage.structured
+        .spaces()
+        .create({ canvasId: 'own', title: 'Own Space' });
+      const command: CanvasCommand = {
+        type: 'CREATE_NODES',
+        nodes: [
+          {
+            id: 'node-image',
+            nodeType: 'image',
+            position: { x: 0, y: 0 },
+            data: { src: `http://127.0.0.1:${port}/endless` },
+          },
+        ],
+      };
+      // Left as it was: the download was refused, not stored.
+      expect(await importForeignNodeSources('own', [command])).toEqual([
+        command,
+      ]);
+    } finally {
+      await opened.close();
+    }
+  });
+});
+
+describe('leavesThroughProxy', () => {
+  const through = (url: string, env: NodeJS.ProcessEnv) =>
+    leavesThroughProxy(new URL(url), env);
+  const BOTH = { HTTP_PROXY: 'http://p:1', HTTPS_PROXY: 'http://p:1' };
+
+  it('follows the proxy configured for the scheme', () => {
+    expect(through('http://example.com/', {})).toBe(false);
+    expect(through('https://example.com/', BOTH)).toBe(true);
+    expect(through('http://example.com/', BOTH)).toBe(true);
+    // An HTTP proxy also carries HTTPS; an HTTPS proxy does not carry HTTP.
+    expect(through('https://example.com/', { HTTP_PROXY: 'http://p:1' })).toBe(
+      true,
+    );
+    expect(through('http://example.com/', { HTTPS_PROXY: 'http://p:1' })).toBe(
+      false,
+    );
+    expect(through('https://example.com/', { https_proxy: 'http://p:1' })).toBe(
+      true,
+    );
+  });
+
+  it.each([
+    ['*', 'https://example.com/', false],
+    ['example.com', 'https://example.com/', false],
+    ['example.com', 'https://api.example.com/', false],
+    ['example.com', 'https://badexample.com/', true],
+    ['.example.com', 'https://example.com/', false],
+    ['*.example.com', 'https://api.example.com/', false],
+    ['*.example.com', 'https://example.com/', false],
+    ['EXAMPLE.com', 'https://Example.COM/', false],
+    ['example.com:8443', 'https://example.com/', true],
+    ['example.com:8443', 'https://example.com:8443/', false],
+    ['example.com:443', 'https://example.com/', false],
+    ['other.test, example.com', 'https://example.com/', false],
+    ['127.0.0.1', 'http://127.0.0.1:3000/', false],
+    ['[::1]', 'http://[::1]:3000/', false],
+    ['[::1]:3000', 'http://[::1]:3000/', false],
+    ['[::1]:3001', 'http://[::1]:3000/', true],
+    // Only the whole value `*` exempts everything.
+    ['none.invalid,*', 'https://example.com/', true],
+    ['', 'https://example.com/', true],
+  ])('NO_PROXY=%j for %s: proxied=%s', (noProxy, url, expected) => {
+    expect(through(url, { ...BOTH, NO_PROXY: noProxy })).toBe(expected);
+    expect(through(url, { ...BOTH, no_proxy: noProxy })).toBe(expected);
+  });
+});
+
+describe('the guarded dispatcher and the built-in fetch', () => {
+  // The guard itself only admits public addresses, which a test cannot serve,
+  // so beside the version pairing above this reads a real response, and a
+  // real redirect, through an Agent of the same package.
+  it("reads a response and follows a redirect through this package's Agent", async () => {
+    const { Agent } = await import('undici');
+    const dispatcher = new Agent();
+    try {
+      const before = requests;
+      const response = await fetch(`http://127.0.0.1:${port}/hop`, {
+        dispatcher,
+      } as RequestInit);
+      expect(response.status).toBe(200);
+      expect(response.redirected).toBe(true);
+      expect(await response.text()).toContain('secret');
+      expect(requests).toBe(before + 2);
+    } finally {
+      await dispatcher.close();
+    }
   });
 });

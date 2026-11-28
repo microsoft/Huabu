@@ -38,6 +38,8 @@ import {
 } from '@/utils/io/dragDrop';
 import { triggerNoteDownload } from '@/utils/io/nodeDownload';
 import { dragPayloadToMarkdown } from '@/utils/io/payloadToMarkdown';
+import { parseNodeReferenceHref } from '@/utils/nodeDeepLink';
+import { openDocumentLink } from '@/utils/openDocumentLink';
 import { isMac } from '@/utils/platform';
 
 import { MissingFileBanner } from '../MissingFileBanner';
@@ -406,6 +408,16 @@ export const NoteNode = memo(
     // hovering between child elements doesn't flicker the highlight.
     const dragCounterRef = useRef(0);
     const [isDropTarget, setIsDropTarget] = useState(false);
+    // The card has no host navigation of its own: only in-app node links are
+    // routed, every other link keeps opening externally.
+    const handleCardLinkClick = useCallback((href: string) => {
+      if (parseNodeReferenceHref(href, window.location.origin)) {
+        openDocumentLink(href);
+      } else {
+        window.open(href, '_blank', 'noopener,noreferrer');
+      }
+    }, []);
+
     const handleNoteDragEnter = useCallback(
       (e: React.DragEvent) => {
         if (isLocked) return;
@@ -589,6 +601,7 @@ export const NoteNode = memo(
                 {hydrated ? (
                   <MilkdownPreview
                     linkActivation="modifier"
+                    onLinkClick={handleCardLinkClick}
                     markdown={markdown}
                     canvasId={canvasId ?? undefined}
                     className="pointer-events-none w-full select-none"

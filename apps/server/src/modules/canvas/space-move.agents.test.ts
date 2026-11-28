@@ -11,6 +11,7 @@ import fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
+import { seedNodeOrder } from '@huabu/shared/canvas-engine';
 import { extractCanvasChanges } from '@huabu/shared/canvas-engine';
 
 import * as executor from './canvas-executor.js';
@@ -246,7 +247,11 @@ forEachProductProfile((profile, label) => {
         source.state.nodes as CanvasNode[],
       );
       expect(restored).toHaveLength(nodes.length);
-      expect(restored).toEqual(expect.arrayContaining(nodes));
+      // The Space gives its nodes their order keys when it is read; a
+      // restored source holds them exactly as before the move.
+      expect(restored).toEqual(
+        expect.arrayContaining(seedNodeOrder(nodes as never[])),
+      );
       expect((await storage.space(DESTINATION).read())?.state.nodes).toEqual(
         [],
       );

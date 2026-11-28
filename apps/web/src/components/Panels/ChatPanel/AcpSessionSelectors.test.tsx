@@ -421,10 +421,10 @@ describe('AcpSessionSelectors capability loading', () => {
 
     const button = container.querySelector('button');
     expect(button).not.toBeNull();
-    expect(button?.textContent).toContain('chat.retryAgentOptions');
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
-      'Agent is offline',
-    );
+    expect(button?.getAttribute('aria-label')).toBe('chat.retryAgentOptions');
+    // The reason is announced with the alert without taking room in the row.
+    const reason = container.querySelector('[role="alert"] .sr-only');
+    expect(reason?.textContent).toBe('Agent is offline');
 
     act(() => {
       button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));

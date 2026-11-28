@@ -32,7 +32,6 @@ export {
 
 export {
   detectNodeType,
-  detectNodeTypeFromMime,
   looksLikeUrl,
   normalizeUrl,
   getImageDimensionsFromBlob,

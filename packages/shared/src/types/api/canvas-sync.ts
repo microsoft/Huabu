@@ -35,10 +35,8 @@
 import { z } from 'zod';
 
 import { CANVAS_PRESENCE_LIMITS } from './canvas-presence-limits.js';
-import { isSetSiblingOrderEvent } from '../../canvas-engine/siblingOrder.js';
 
 import type { CanvasChangeRecord } from '../../canvas-engine/change.js';
-import type { SetSiblingOrderEvent } from '../../canvas-engine/siblingOrder.js';
 
 /**
  * The id a browser page gives itself (one per loaded document). The one shape
@@ -78,6 +76,26 @@ export const canvasSyncEventSchema = z.discriminatedUnion('type', [
        * fetch it again; every other page does.
        */
       originPageId: canvasPageIdSchema.optional(),
+      /**
+       * A conversation whose pending review records changed without a canvas
+       * write, as when one was kept, or after one was reverted. A page reads
+       * that conversation's records again.
+       */
+      reviewThreadId: z.string().optional(),
+    }),
+  }),
+  z.object({
+    type: z.literal('preprocess'),
+    /**
+     * Preprocessing the server runs for a node after a write: `pending`
+     * when it starts, then `done` or `error`. What a run derived arrives
+     * separately, as node content does. Nothing is kept for a page that is
+     * not listening: a page that loads later shows no pending state.
+     */
+    data: z.object({
+      nodeId: z.string(),
+      status: z.enum(['pending', 'done', 'error']),
+      error: z.string().optional(),
     }),
   }),
   z.object({
@@ -96,13 +114,6 @@ export const canvasSyncEventSchema = z.discriminatedUnion('type', [
       /** Structural deltas between prestate and poststate, in apply order. */
       deltas: z.array(z.unknown()),
       pendingEffects: canvasSyncPendingEffectsSchema,
-      /**
-       * Sibling paint order of every parent the batch changed, replayed
-       * after `deltas`. Absent when no order changed.
-       */
-      orderEvents: z
-        .array(z.custom<SetSiblingOrderEvent>(isSetSiblingOrderEvent))
-        .optional(),
       /**
        * Stored content revision of every node whose saved content (a
        * sidecar field) this batch created or changed, keyed by node id — the
@@ -193,6 +204,20 @@ export interface CanvasContentChangesResponse {
 /** Response for `GET /api/canvas/:canvasId/threads/:threadId/changes`. */
 export interface GetThreadChangesResponse {
   changes: CanvasChangeRecord[];
+}
+
+/** Body of `POST /api/canvas/:canvasId/changes/query`. */
+export const querySpaceChangesBodySchema = z.object({
+  /** The conversations to read; a Space's page names those it shows. */
+  threadIds: z.array(z.string().min(1).max(256)).max(500),
+});
+
+/**
+ * Response for `POST /api/canvas/:canvasId/changes/query`: the pending
+ * review records of each named thread that has any.
+ */
+export interface QuerySpaceChangesResponse {
+  threads: Record<string, CanvasChangeRecord[]>;
 }
 
 /**

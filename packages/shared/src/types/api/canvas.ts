@@ -17,7 +17,6 @@ import {
 } from './canvas-sync.js';
 
 import type { videoCoverPatchSchema } from './preprocessing.js';
-import type { SetSiblingOrderEvent } from '../../canvas-engine/siblingOrder.js';
 
 export const nodePropertyValueSchema = z.union([
   z.string(),
@@ -172,6 +171,15 @@ export const putNodeContentBodySchema = z.object({
    * properties.
    */
   expectRev: z.string().optional(),
+  /**
+   * The person has left the editor of this `note` / `text` node: its body
+   * is as they mean it, and the server derives the title from it. Saves
+   * made while typing do not say so, because a title derived from each
+   * intermediate body renamed the node's file again and again. Sent with
+   * the save made on leaving the editor, which may carry nothing else when
+   * the body was already saved.
+   */
+  editingEnded: z.boolean().optional(),
   /**
    * The saving page's id (its `originator.tabId` / presence page id). Echoed
    * as `originPageId` on the `invalidate` event so that page can tell its own
@@ -648,12 +656,6 @@ export interface PostCanvasExecuteResponse {
   edits: CanvasExecuteEditOutcome[];
   /** Subset of engine-pending effects that clients should drain. */
   pendingEffects: CanvasExecutePendingEffects;
-  /**
-   * Sibling paint order of every parent the batch changed, to replay after
-   * `deltas`. Absent when no order changed; ignoring it keeps entity-only
-   * replay.
-   */
-  orderEvents?: SetSiblingOrderEvent[];
   /**
    * Stored content revision of every node whose saved content (a sidecar
    * field) this batch created or changed, keyed by node id. The page that

@@ -87,7 +87,14 @@ interface SceneNode {
   layoutMode: string | null;
   column: number | null;
   row: number | null;
+  /**
+   * A Column / Row Frame's reading order, as its children store it: each
+   * child's track and its key inside that track.
+   */
   layoutOrder: string[][] | null;
+  /** Paint order among siblings, and reading order inside a track. */
+  paintKey: string | null;
+  trackKey: string | null;
   accent: string | null;
   label: string | null;
   content: string | null;
@@ -213,13 +220,33 @@ function sceneOf(raw: RawNode[]): Scene {
       layoutMode: string(data.layoutMode),
       column: number(data.frameColumn),
       row: number(data.frameRow),
-      layoutOrder: Array.isArray(data.layoutOrder)
-        ? (data.layoutOrder as string[][])
-        : null,
+      layoutOrder: null,
+      paintKey: string(data.paintKey),
+      trackKey: string(data.trackKey),
       accent: string((data.style as { accent?: unknown } | undefined)?.accent),
       label: string(data.label),
       content: string(data.content)?.trim() ?? null,
     };
+  }
+  for (const [frameId, frame] of Object.entries(nodes)) {
+    if (frame.layoutMode !== 'column' && frame.layoutMode !== 'row') continue;
+    const tracks = new Map<number, string[]>();
+    for (const id of children[frameId] ?? []) {
+      const child = nodes[id];
+      if (child.trackKey === null) continue;
+      const track =
+        (frame.layoutMode === 'column' ? child.column : child.row) ?? 0;
+      tracks.set(track, [...(tracks.get(track) ?? []), id]);
+    }
+    frame.layoutOrder = [...tracks.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(([, ids]) =>
+        ids.sort((a, b) => {
+          const keyA = nodes[a].trackKey as string;
+          const keyB = nodes[b].trackKey as string;
+          return keyA < keyB ? -1 : keyA > keyB ? 1 : a < b ? -1 : 1;
+        }),
+      );
   }
   return { nodes, children };
 }
@@ -361,6 +388,8 @@ function expectSameScene(
       'column',
       'row',
       'layoutOrder',
+      'paintKey',
+      'trackKey',
       'accent',
       'label',
       'content',

@@ -54,6 +54,8 @@ export interface QueuedAgentTurn {
   id: string;
   prepared: PreparedAgentTurn;
   status: 'pending' | 'sending' | 'uncertain';
+  /** Queued while a settings save was in flight; read them again at send. */
+  settingsPending?: boolean;
 }
 
 export interface ChatThreadState {

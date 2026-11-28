@@ -18,7 +18,7 @@ import type {
   PreprocessDiagnostic,
   PreprocessNodeResult,
 } from '../types.js';
-import type { PreprocessNodeRequest } from '@huabu/shared';
+import type { PreprocessNodeRequest } from '../types.js';
 
 export function project(
   request: PreprocessNodeRequest,
@@ -114,7 +114,6 @@ export function project(
   return {
     nodeId: request.nodeId,
     nodeType: request.nodeType,
-    trigger: request.trigger,
     requestId,
     success: !hasError,
     status,

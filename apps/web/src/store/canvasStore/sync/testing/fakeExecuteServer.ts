@@ -28,11 +28,12 @@ import {
   applySharedPostEffectsFromWriteResult,
   createReadVersionAdmission,
   diffCanvasState,
-  diffSiblingOrderEvents,
   executeCanvasEdits,
+  seedNodeOrder,
   stripTransientNodeFields,
   toWireDeltas,
   type CanvasNode,
+  type NestableNode,
   type NodeStamp,
 } from '@huabu/shared/canvas-engine';
 
@@ -108,8 +109,10 @@ export function createFakeExecuteServer(
         }
       }
       const before = read();
-      const prevNodes = before.nodes.map((node) =>
-        stripTransientNodeFields(node),
+      // The server's read of a stored Space keys every node that has no
+      // paint key, before any batch runs. Keyed nodes come back unchanged.
+      const prevNodes = seedStoredNodes(
+        before.nodes.map((node) => stripTransientNodeFields(node)),
       );
       const page = request.originator?.tabId;
       const readStamps = { floor: 0, nodes: currentStamps() };
@@ -178,13 +181,6 @@ export function createFakeExecuteServer(
         prevNodes.length !== nextNodes.length ||
         prevNodes.some((node, index) => node.id !== nextNodes[index]?.id);
       const toVersion = changed ? before.version + 1 : before.version;
-      const orderEvents = changed
-        ? diffSiblingOrderEvents(
-            prevNodes as unknown as CanvasNode[],
-            nextNodes as unknown as CanvasNode[],
-            toVersion,
-          )
-        : [];
       if (changed) {
         const checked = edits.every((edit) => edit.version !== undefined);
         stamps = advanceNodeStamps(
@@ -224,7 +220,6 @@ export function createFakeExecuteServer(
           contentEditedNodeIds: out.pendingEffects.contentEditedNodeIds,
           deferredFitFrameIds: out.pendingEffects.deferredFitFrameIds,
         },
-        ...(orderEvents.length > 0 ? { orderEvents } : {}),
         ...(nodeContentRevisions ? { nodeContentRevisions } : {}),
         ...(operationId ? { operationId } : {}),
       };
@@ -234,10 +229,22 @@ export function createFakeExecuteServer(
   };
 }
 
+/**
+ * Key a stored Space's nodes the way the server's read does. A test that
+ * puts nodes into the store as a loaded Space passes them through this, so
+ * the page starts with the keys a real load gives it.
+ */
+export function seedStoredNodes<T extends Node>(nodes: readonly T[]): T[] {
+  return seedNodeOrder(nodes as unknown as NestableNode[]) as unknown as T[];
+}
+
 export interface FakeSpaceServer extends FakeExecuteServer {
   /** The server's copy of the Space. */
   readonly state: FakeServerState;
-  /** Replace the server copy, as a fresh Space load would find it. */
+  /**
+   * Replace the server copy, as a fresh Space load would find it: nodes
+   * stored without paint keys are given them, as the server's read does.
+   */
   reset(nodes: Node[], edges: Edge[], version?: number): void;
 }
 
@@ -259,7 +266,7 @@ export function createFakeSpaceServer(): FakeSpaceServer {
       return state;
     },
     reset(nodes, edges, version = 1) {
-      state = { nodes, edges, version };
+      state = { nodes: seedStoredNodes(nodes), edges, version };
       server.requests.length = 0;
     },
   };

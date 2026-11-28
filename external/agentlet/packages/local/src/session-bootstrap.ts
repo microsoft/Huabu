@@ -1,6 +1,6 @@
-import type { JsonRpcMessage } from '@agentlet/protocol'
-import type { AgentProcess } from './agent-process.js'
-import type { Logger } from './logger.js'
+import type { JsonRpcMessage } from '@agentlet/protocol';
+import type { AgentProcess } from './agent-process.js';
+import type { Logger } from './logger.js';
 
 /**
  * Grace window (ms) to keep collecting `session/update` notifications after the
@@ -9,7 +9,7 @@ import type { Logger } from './logger.js'
  * reliably captures it without meaningfully delaying bootstrap (the spawn
  * itself already takes seconds).
  */
-const SESSION_NEW_NOTIFICATION_GRACE_MS = 300
+const SESSION_NEW_NOTIFICATION_GRACE_MS = 300;
 
 /**
  * No grace window for `initialize`: no known agent pushes `session/update`
@@ -18,27 +18,27 @@ const SESSION_NEW_NOTIFICATION_GRACE_MS = 300
  * is captured rather than silently dropped. graceMs=0 means: resolve as soon
  * as the response arrives, no extra wait.
  */
-const INITIALIZE_NOTIFICATION_GRACE_MS = 0
+const INITIALIZE_NOTIFICATION_GRACE_MS = 0;
 
 /**
  * Default per-request timeout (ms) for bootstrap calls. Generous to tolerate
  * slow agent cold starts (e.g. Copilot taking tens of seconds to answer
  * `initialize` on first launch).
  */
-const DEFAULT_BOOTSTRAP_TIMEOUT_MS = 90_000
+const DEFAULT_BOOTSTRAP_TIMEOUT_MS = 90_000;
 
 const SESSION_RESUME_UNAVAILABLE_RPC_CODES = new Set([
   -32601, // Method not found.
   -32602, // Invalid session identifier/parameters.
   -32002, // ACP resource not found.
-])
+]);
 
 export class SessionResumeUnavailableError extends Error {
-  readonly code = 'session_resume_unavailable' as const
+  readonly code = 'session_resume_unavailable' as const;
 
   constructor(message: string) {
-    super(message)
-    this.name = 'SessionResumeUnavailableError'
+    super(message);
+    this.name = 'SessionResumeUnavailableError';
   }
 }
 
@@ -47,11 +47,11 @@ function throwResumeError(
   sessionId: string,
   error: { code: number; message: string },
 ): never {
-  const message = `${method} failed for session ${sessionId}: ${JSON.stringify(error)}`
+  const message = `${method} failed for session ${sessionId}: ${JSON.stringify(error)}`;
   if (SESSION_RESUME_UNAVAILABLE_RPC_CODES.has(error.code)) {
-    throw new SessionResumeUnavailableError(message)
+    throw new SessionResumeUnavailableError(message);
   }
-  throw new Error(message)
+  throw new Error(message);
 }
 
 /**
@@ -60,13 +60,13 @@ function throwResumeError(
  */
 export interface SessionProfile {
   /** The active ACP sessionId */
-  sessionId: string
+  sessionId: string;
   /** Whether the agent supports session/load */
-  supportsLoad: boolean
+  supportsLoad: boolean;
   /** Whether the agent supports session/resume */
-  supportsResume: boolean
+  supportsResume: boolean;
   /** The full ACP initialize response */
-  initializeResult: unknown
+  initializeResult: unknown;
   /**
    * The full ACP `session/new` response, when this profile came from a
    * freshly-created session (absent on resume/load). Stored opaquely —
@@ -76,7 +76,7 @@ export interface SessionProfile {
    * the consumer (host) reads them from this blob to seed its UI without
    * waiting for the first prompt.
    */
-  newSessionResult?: unknown
+  newSessionResult?: unknown;
   /**
    * `session/update` notifications captured during `session/new` (and a short
    * grace window after its response). Some agents (e.g. Copilot) push
@@ -85,19 +85,19 @@ export interface SessionProfile {
    * the gap before the relay attaches its live listener. The daemon replays
    * these to the host the moment the relay connects.
    */
-  bootstrapNotifications?: JsonRpcMessage[]
+  bootstrapNotifications?: JsonRpcMessage[];
 }
 
 export interface BootstrapOptions {
   /** Working directory to pass to session lifecycle calls */
-  cwd: string
+  cwd: string;
   /** Timeout for each request in ms */
-  timeout?: number
+  timeout?: number;
   /**
    * If provided, resume an existing session instead of creating a new one.
    * The bootstrap will use session/resume (preferred) or session/load based on agent capabilities.
    */
-  sessionId?: string
+  sessionId?: string;
 }
 
 /**
@@ -110,62 +110,89 @@ export async function bootstrapSession(
   options: BootstrapOptions,
   logger: Logger,
 ): Promise<SessionProfile> {
-  const timeout = options.timeout ?? DEFAULT_BOOTSTRAP_TIMEOUT_MS
+  const timeout = options.timeout ?? DEFAULT_BOOTSTRAP_TIMEOUT_MS;
 
   // 1. Send initialize. Routed through the collector helper so any unexpected
   // notification that arrives during initialize is captured (and replayed by
   // the daemon) instead of being silently dropped by an id-only handler.
-  logger.info('session_bootstrap_initialize', { cwd: options.cwd })
-  const initResponse = await sendRequestCollectingNotifications(agent, 1, 'initialize', {
-    protocolVersion: 1,
-    clientCapabilities: {},
-    clientInfo: { name: 'agentlet', version: '1.0.0' },
-  }, timeout, INITIALIZE_NOTIFICATION_GRACE_MS)
+  logger.info('session_bootstrap_initialize', { cwd: options.cwd });
+  const initResponse = await sendRequestCollectingNotifications(
+    agent,
+    1,
+    'initialize',
+    {
+      protocolVersion: 1,
+      clientCapabilities: {},
+      clientInfo: { name: 'agentlet', version: '1.0.0' },
+    },
+    timeout,
+    INITIALIZE_NOTIFICATION_GRACE_MS,
+  );
 
   if (!initResponse.result) {
-    throw new Error(`initialize failed: ${JSON.stringify(initResponse.error ?? 'no result')}`)
+    throw new Error(
+      `initialize failed: ${JSON.stringify(initResponse.error ?? 'no result')}`,
+    );
   }
 
   if (initResponse.notifications.length > 0) {
     logger.info('session_bootstrap_initialize_notifications', {
       count: initResponse.notifications.length,
-      methods: initResponse.notifications.map((n) => (n as { method?: string }).method),
-    })
+      methods: initResponse.notifications.map(
+        (n) => (n as { method?: string }).method,
+      ),
+    });
   }
 
-  const initResult = initResponse.result as Record<string, unknown>
-  const agentCapabilities = initResult.agentCapabilities as Record<string, unknown> | undefined
-  const supportsLoad = agentCapabilities?.loadSession === true
-  const sessionCapabilities = agentCapabilities?.sessionCapabilities as Record<string, unknown> | undefined
-  const supportsResume = sessionCapabilities?.resume != null
+  const initResult = initResponse.result as Record<string, unknown>;
+  const agentCapabilities = initResult.agentCapabilities as
+    | Record<string, unknown>
+    | undefined;
+  const supportsLoad = agentCapabilities?.loadSession === true;
+  const sessionCapabilities = agentCapabilities?.sessionCapabilities as
+    | Record<string, unknown>
+    | undefined;
+  const supportsResume = sessionCapabilities?.resume != null;
 
   logger.info('session_bootstrap_initialized', {
     supportsLoad,
     supportsResume,
     agentInfo: initResult.agentInfo,
     protocolVersion: initResult.protocolVersion,
-  })
+  });
 
   // 2. Session lifecycle: new, resume, or load
-  let sessionId: string
-  let newSessionResult: unknown
+  let sessionId: string;
+  let newSessionResult: unknown;
   // Seed with anything captured during initialize so replay order matches
   // wire arrival order (initialize-time notifications first, session/new
   // notifications second).
-  let bootstrapNotifications: JsonRpcMessage[] = [...initResponse.notifications]
+  let bootstrapNotifications: JsonRpcMessage[] = [
+    ...initResponse.notifications,
+  ];
 
   if (options.sessionId) {
     // Resuming an existing session
-    sessionId = await bootstrapResumeOrLoad(agent, options, { supportsLoad, supportsResume }, logger, timeout)
+    sessionId = await bootstrapResumeOrLoad(
+      agent,
+      options,
+      { supportsLoad, supportsResume },
+      logger,
+      timeout,
+    );
   } else {
     // Creating a new session
-    const created = await bootstrapNew(agent, options, logger, timeout)
-    sessionId = created.sessionId
-    newSessionResult = created.newSessionResult
-    bootstrapNotifications.push(...created.notifications)
+    const created = await bootstrapNew(agent, options, logger, timeout);
+    sessionId = created.sessionId;
+    newSessionResult = created.newSessionResult;
+    bootstrapNotifications.push(...created.notifications);
   }
 
-  logger.info('session_bootstrap_complete', { sessionId, supportsLoad, supportsResume })
+  logger.info('session_bootstrap_complete', {
+    sessionId,
+    supportsLoad,
+    supportsResume,
+  });
 
   return {
     sessionId,
@@ -174,7 +201,7 @@ export async function bootstrapSession(
     initializeResult: initResult,
     newSessionResult,
     bootstrapNotifications,
-  }
+  };
 }
 
 /**
@@ -189,29 +216,48 @@ async function bootstrapNew(
   options: BootstrapOptions,
   logger: Logger,
   timeout: number,
-): Promise<{ sessionId: string; newSessionResult: unknown; notifications: JsonRpcMessage[] }> {
-  logger.info('session_bootstrap_session_new', { cwd: options.cwd })
-  const response = await sendRequestCollectingNotifications(agent, 2, 'session/new', {
-    cwd: options.cwd,
-    mcpServers: [],
-  }, timeout, SESSION_NEW_NOTIFICATION_GRACE_MS)
+): Promise<{
+  sessionId: string;
+  newSessionResult: unknown;
+  notifications: JsonRpcMessage[];
+}> {
+  logger.info('session_bootstrap_session_new', { cwd: options.cwd });
+  const response = await sendRequestCollectingNotifications(
+    agent,
+    2,
+    'session/new',
+    {
+      cwd: options.cwd,
+      mcpServers: [],
+    },
+    timeout,
+    SESSION_NEW_NOTIFICATION_GRACE_MS,
+  );
 
   if (!response.result) {
-    throw new Error(`session/new failed: ${JSON.stringify(response.error ?? 'no result')}`)
+    throw new Error(
+      `session/new failed: ${JSON.stringify(response.error ?? 'no result')}`,
+    );
   }
 
-  const result = response.result as Record<string, unknown>
-  const sessionId = result.sessionId as string
+  const result = response.result as Record<string, unknown>;
+  const sessionId = result.sessionId as string;
   if (!sessionId) {
-    throw new Error('session/new response missing sessionId')
+    throw new Error('session/new response missing sessionId');
   }
   if (response.notifications.length > 0) {
     logger.info('session_bootstrap_captured_notifications', {
       count: response.notifications.length,
-      methods: response.notifications.map((n) => (n as { method?: string }).method),
-    })
+      methods: response.notifications.map(
+        (n) => (n as { method?: string }).method,
+      ),
+    });
   }
-  return { sessionId, newSessionResult: result, notifications: response.notifications }
+  return {
+    sessionId,
+    newSessionResult: result,
+    notifications: response.notifications,
+  };
 }
 
 /**
@@ -229,34 +275,57 @@ async function bootstrapResumeOrLoad(
   logger: Logger,
   timeout: number,
 ): Promise<string> {
-  const sessionId = options.sessionId!
+  const sessionId = options.sessionId!;
   const sessionParams = {
     sessionId,
     cwd: options.cwd,
     mcpServers: [],
-  }
+  };
 
   if (caps.supportsResume) {
     // Prefer session/resume — no history replay needed
-    logger.info('session_bootstrap_session_resume', { sessionId, cwd: options.cwd })
-    const response = await sendRequest(agent, 2, 'session/resume', sessionParams, timeout)
-    if (response.error) throwResumeError('session/resume', sessionId, response.error)
-    if (response.result === undefined) throw new Error('session/resume returned no result')
-    return sessionId
+    logger.info('session_bootstrap_session_resume', {
+      sessionId,
+      cwd: options.cwd,
+    });
+    const response = await sendRequest(
+      agent,
+      2,
+      'session/resume',
+      sessionParams,
+      timeout,
+    );
+    if (response.error)
+      throwResumeError('session/resume', sessionId, response.error);
+    if (response.result === undefined)
+      throw new Error('session/resume returned no result');
+    return sessionId;
   }
 
   if (caps.supportsLoad) {
     // Fall back to session/load — must handle session/update notifications during load
-    logger.info('session_bootstrap_session_load', { sessionId, cwd: options.cwd })
-    const response = await sendRequestWithNotificationDrain(agent, 2, 'session/load', sessionParams, timeout, logger)
-    if (response.error) throwResumeError('session/load', sessionId, response.error)
-    if (response.result === undefined) throw new Error('session/load returned no result')
-    return sessionId
+    logger.info('session_bootstrap_session_load', {
+      sessionId,
+      cwd: options.cwd,
+    });
+    const response = await sendRequestWithNotificationDrain(
+      agent,
+      2,
+      'session/load',
+      sessionParams,
+      timeout,
+      logger,
+    );
+    if (response.error)
+      throwResumeError('session/load', sessionId, response.error);
+    if (response.result === undefined)
+      throw new Error('session/load returned no result');
+    return sessionId;
   }
 
   throw new SessionResumeUnavailableError(
-    `Cannot resume session ${sessionId}: agent supports neither session/resume nor session/load`
-  )
+    `Cannot resume session ${sessionId}: agent supports neither session/resume nor session/load`,
+  );
 }
 
 /**
@@ -271,51 +340,51 @@ function sendRequest(
 ): Promise<{ result?: unknown; error?: { code: number; message: string } }> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
-      cleanup()
-      reject(new Error(`ACP request '${method}' timed out after ${timeout}ms`))
-    }, timeout)
+      cleanup();
+      reject(new Error(`ACP request '${method}' timed out after ${timeout}ms`));
+    }, timeout);
 
     const handler = (data: unknown) => {
-      const msg = data as JsonRpcMessage
+      const msg = data as JsonRpcMessage;
       if ('id' in msg && msg.id === id) {
-        cleanup()
+        cleanup();
         if ('error' in msg && msg.error) {
-          resolve({ error: msg.error })
+          resolve({ error: msg.error });
         } else if ('result' in msg) {
-          resolve({ result: msg.result })
+          resolve({ result: msg.result });
         } else {
-          resolve({})
+          resolve({});
         }
       }
-    }
+    };
 
     function cleanup() {
-      clearTimeout(timer)
-      agent.removeListener('message', handler)
-      agent.removeListener('exit', onExit)
+      clearTimeout(timer);
+      agent.removeListener('message', handler);
+      agent.removeListener('exit', onExit);
     }
 
     function onExit() {
-      cleanup()
-      reject(new Error(`Agent exited during '${method}'`))
+      cleanup();
+      reject(new Error(`Agent exited during '${method}'`));
     }
 
-    agent.on('message', handler)
-    agent.once('exit', onExit)
+    agent.on('message', handler);
+    agent.once('exit', onExit);
 
     const request: JsonRpcMessage = {
       jsonrpc: '2.0',
       method,
       id,
       params: params as Record<string, unknown>,
-    }
+    };
 
-    const written = agent.write(request)
+    const written = agent.write(request);
     if (!written) {
-      cleanup()
-      reject(new Error(`Failed to write '${method}' to agent stdin`))
+      cleanup();
+      reject(new Error(`Failed to write '${method}' to agent stdin`));
     }
-  })
+  });
 }
 
 /**
@@ -335,98 +404,108 @@ function sendRequestCollectingNotifications(
   params: unknown,
   timeout: number,
   graceMs: number,
-): Promise<{ result?: unknown; error?: { code: number; message: string }; notifications: JsonRpcMessage[] }> {
+): Promise<{
+  result?: unknown;
+  error?: { code: number; message: string };
+  notifications: JsonRpcMessage[];
+}> {
   return new Promise((resolve, reject) => {
-    const notifications: JsonRpcMessage[] = []
-    let graceTimer: ReturnType<typeof setTimeout> | null = null
-    let settled = false
+    const notifications: JsonRpcMessage[] = [];
+    let graceTimer: ReturnType<typeof setTimeout> | null = null;
+    let settled = false;
 
     const timer = setTimeout(() => {
-      cleanup()
-      reject(new Error(`ACP request '${method}' timed out after ${timeout}ms`))
-    }, timeout)
+      cleanup();
+      reject(new Error(`ACP request '${method}' timed out after ${timeout}ms`));
+    }, timeout);
 
-    const finalize = (payload: { result?: unknown; error?: { code: number; message: string } }) => {
+    const finalize = (payload: {
+      result?: unknown;
+      error?: { code: number; message: string };
+    }) => {
       // Snapshot before resolving so any late append (during the deferred
       // cleanup window below) does not mutate the caller's view.
-      const snapshot = notifications.slice()
-      resolve({ ...payload, notifications: snapshot })
+      const snapshot = notifications.slice();
+      resolve({ ...payload, notifications: snapshot });
       // Defer listener removal by one microtask so the awaiting caller can
       // synchronously attach its own listener before we detach — closing the
       // gap where a notification could arrive with no subscriber. Microtasks
       // drain before the event loop processes the next pipe read, so no
       // 'message' event can fire between resolve and the caller attaching.
-      queueMicrotask(cleanup)
-    }
+      queueMicrotask(cleanup);
+    };
 
-    const settle = (payload: { result?: unknown; error?: { code: number; message: string } }) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
+    const settle = (payload: {
+      result?: unknown;
+      error?: { code: number; message: string };
+    }) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
       // Error path: short-circuit. No need to wait the grace window for
       // notifications that wouldn't matter — the caller will throw.
       // Grace=0 path: caller opted out (e.g. initialize), resolve immediately.
       if (payload.error || graceMs <= 0) {
-        finalize(payload)
-        return
+        finalize(payload);
+        return;
       }
       // Success path: keep collecting for a short grace window so we also
       // catch notifications emitted immediately AFTER the response.
       graceTimer = setTimeout(() => {
-        graceTimer = null
-        finalize(payload)
-      }, graceMs)
-    }
+        graceTimer = null;
+        finalize(payload);
+      }, graceMs);
+    };
 
     const handler = (data: unknown) => {
-      const msg = data as JsonRpcMessage
+      const msg = data as JsonRpcMessage;
       if ('id' in msg && msg.id === id) {
         if ('error' in msg && msg.error) {
-          settle({ error: msg.error })
+          settle({ error: msg.error });
         } else if ('result' in msg) {
-          settle({ result: msg.result })
+          settle({ result: msg.result });
         } else {
-          settle({})
+          settle({});
         }
-        return
+        return;
       }
       // Otherwise it's a notification (e.g. available_commands_update) — keep it.
       if ('method' in msg && !('id' in msg)) {
-        notifications.push(msg)
+        notifications.push(msg);
       }
-    }
+    };
 
     function cleanup() {
-      clearTimeout(timer)
+      clearTimeout(timer);
       if (graceTimer) {
-        clearTimeout(graceTimer)
-        graceTimer = null
+        clearTimeout(graceTimer);
+        graceTimer = null;
       }
-      agent.removeListener('message', handler)
-      agent.removeListener('exit', onExit)
+      agent.removeListener('message', handler);
+      agent.removeListener('exit', onExit);
     }
 
     function onExit() {
-      cleanup()
-      reject(new Error(`Agent exited during '${method}'`))
+      cleanup();
+      reject(new Error(`Agent exited during '${method}'`));
     }
 
-    agent.on('message', handler)
-    agent.once('exit', onExit)
+    agent.on('message', handler);
+    agent.once('exit', onExit);
 
     const request: JsonRpcMessage = {
       jsonrpc: '2.0',
       method,
       id,
       params: params as Record<string, unknown>,
-    }
+    };
 
-    const written = agent.write(request)
+    const written = agent.write(request);
     if (!written) {
-      cleanup()
-      reject(new Error(`Failed to write '${method}' to agent stdin`))
+      cleanup();
+      reject(new Error(`Failed to write '${method}' to agent stdin`));
     }
-  })
+  });
 }
 
 /**
@@ -443,59 +522,63 @@ function sendRequestWithNotificationDrain(
   logger: Logger,
 ): Promise<{ result?: unknown; error?: { code: number; message: string } }> {
   return new Promise((resolve, reject) => {
-    let notificationCount = 0
+    let notificationCount = 0;
 
     const timer = setTimeout(() => {
-      cleanup()
-      reject(new Error(`ACP request '${method}' timed out after ${timeout}ms (received ${notificationCount} notifications before timeout)`))
-    }, timeout)
+      cleanup();
+      reject(
+        new Error(
+          `ACP request '${method}' timed out after ${timeout}ms (received ${notificationCount} notifications before timeout)`,
+        ),
+      );
+    }, timeout);
 
     const handler = (data: unknown) => {
-      const msg = data as JsonRpcMessage
+      const msg = data as JsonRpcMessage;
       // If it's the response to our request
       if ('id' in msg && msg.id === id) {
-        cleanup()
-        logger.info('session_load_drain_complete', { notificationCount })
+        cleanup();
+        logger.info('session_load_drain_complete', { notificationCount });
         if ('error' in msg && msg.error) {
-          resolve({ error: msg.error })
+          resolve({ error: msg.error });
         } else if ('result' in msg) {
-          resolve({ result: msg.result })
+          resolve({ result: msg.result });
         } else {
-          resolve({})
+          resolve({});
         }
-        return
+        return;
       }
       // Otherwise it's a notification (session/update during load) — drain it
       if ('method' in msg && !('id' in msg)) {
-        notificationCount++
+        notificationCount++;
       }
-    }
+    };
 
     function cleanup() {
-      clearTimeout(timer)
-      agent.removeListener('message', handler)
-      agent.removeListener('exit', onExit)
+      clearTimeout(timer);
+      agent.removeListener('message', handler);
+      agent.removeListener('exit', onExit);
     }
 
     function onExit() {
-      cleanup()
-      reject(new Error(`Agent exited during '${method}'`))
+      cleanup();
+      reject(new Error(`Agent exited during '${method}'`));
     }
 
-    agent.on('message', handler)
-    agent.once('exit', onExit)
+    agent.on('message', handler);
+    agent.once('exit', onExit);
 
     const request: JsonRpcMessage = {
       jsonrpc: '2.0',
       method,
       id,
       params: params as Record<string, unknown>,
-    }
+    };
 
-    const written = agent.write(request)
+    const written = agent.write(request);
     if (!written) {
-      cleanup()
-      reject(new Error(`Failed to write '${method}' to agent stdin`))
+      cleanup();
+      reject(new Error(`Failed to write '${method}' to agent stdin`));
     }
-  })
+  });
 }

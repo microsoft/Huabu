@@ -355,6 +355,39 @@
   --animate-preview-blink: preview-blink 0.6s ease-in-out infinite;
 }
 
+/* The attention badge on a canvas node. A gap in the colour of what it sits
+   on (--attention-gap) sets it off, a faint ring of its
+   own colour makes it easy to find, and two ripples mark the moment it
+   arrives. */
+.attention-halo {
+  box-shadow:
+    0 0 0 2px var(--attention-gap, var(--bg-default)),
+    0 0 0 4px color-mix(in srgb, var(--attention-color) 24%, transparent);
+}
+.attention-arrive::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border-radius: 9999px;
+  border: 2px solid color-mix(in srgb, var(--attention-color) 50%, transparent);
+  opacity: 0;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .attention-arrive::after {
+    animation: attention-arrive 1.2s ease-out 2;
+  }
+}
+@keyframes attention-arrive {
+  from {
+    transform: scale(0.4);
+    opacity: 1;
+  }
+  to {
+    transform: scale(1.25);
+    opacity: 0;
+  }
+}
+
 @keyframes preview-blink {
   0%,
   100% {

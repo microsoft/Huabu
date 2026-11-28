@@ -78,7 +78,24 @@
     "label": "已打开的 Space",
     "newTab": "新标签页",
     "noMatchingSpaces": "没有匹配的 Space。",
-    "closeTab": "关闭标签页"
+    "closeTab": "关闭标签页",
+    "unseen": "{{count}} 个对话有你没看的内容"
+  },
+  "attention": {
+    "done": "做完了，还没看",
+    "error": "出错了",
+    "approval": "等你批准"
+  },
+  "unseenChanges": {
+    "create": "{{conversation}} · 新建",
+    "update": "{{conversation}} · 改过",
+    "open": "点击查看对话"
+  },
+  "turnNotices": {
+    "done": "做完了",
+    "error": "出错了",
+    "approval": "等你批准后才能继续",
+    "several": "{{count}} 个对话有新进展"
   },
   "sigil": {
     "chooseResource": "选择资源",
@@ -471,6 +488,11 @@
     "showMiniMap": "显示小地图",
     "hideMiniMap": "隐藏小地图",
     "miniMapDescription": "在 Space 右下角显示概览。",
+    "notifyTurnDone": "Agent 做完时通知",
+    "notifyTurnDoneDescription": "一轮对话在你没有看着的 Space 里结束时，发一条系统通知。",
+    "notifyNeedsYou": "Agent 需要你时通知",
+    "notifyNeedsYouDescription": "Agent 在你没有看着的 Space 里出错或等你批准时，发一条系统通知。",
+    "turnNoticesBlocked": "浏览器不允许这个页面发通知，请先在浏览器设置里允许。",
     "worldCanvas": "World Canvas",
     "worldCanvasDescription": "将 World 作为工作区入口，并显示 Space 快捷入口。",
     "showWorldCanvas": "显示 World Canvas",
@@ -1120,6 +1142,7 @@
     "noPdfSource": "无 PDF 来源",
     "noCanvasToSave": "没有可保存的 Space",
     "uploadFailed": "上传失败",
+    "unsupportedFileType": "不支持的文件类型：{{names}}",
     "micBlocked": "麦克风被阻止：{{message}}",
     "microphoneAccessDenied": "麦克风访问被拒绝",
     "audioFileMissing": "音频文件缺失",
@@ -1237,6 +1260,12 @@
     "workingDirectorySinglePath": "请输入单个目录路径。",
     "workingDirectoryOverride": "工作目录覆盖",
     "historyLoadFailed": "加载会话历史失败",
+    "historyRefreshFailed": "刷新会话历史失败",
+    "historyTurnNotSaved": "刚完成的这一轮还没有写入历史，已保留当前消息。",
+    "historyPageFailed": "加载这部分历史失败",
+    "olderHistoryFailed": "加载更早的轮次失败",
+    "historyChanged": "会话历史已变化，需要重新加载。",
+    "historyReloadBusy": "请等当前这一轮结束后再重新加载历史。",
     "workingDirectoryOverrideDescription": "可选择仅为此会话使用不同的目录。",
     "workingDirectoryOverrideActive": "会话工作目录：{{path}}",
     "workingDirectoryOverrideInherited": "工作目录继承自 Profile：{{path}}",
@@ -1288,6 +1317,7 @@
     "newTemporaryConversation": "新建临时对话",
     "newConversationOptions": "对话创建选项",
     "titleSaveFailed": "无法同步对话标题",
+    "agentSessionLoadFailed": "无法加载 {{agent}} 的会话信息",
     "retryTitleSave": "重试标题保存",
     "renameTitle": "重命名对话",
     "newChatWith": "使用 {{name}} 新建聊天",
@@ -1421,7 +1451,6 @@
     "partialStrokeCount_other": "{{count}} 笔"
   },
   "messages": {
-    "seeMore": "查看更多",
     "detailsLoading": "正在加载详情…",
     "detailsLoadFailed": "无法加载详情。",
     "listLabel": "对话消息",
@@ -1489,6 +1518,7 @@
     "activityErrorSteps_other": "发生错误 · {{count}} 个步骤",
     "activityFilesChanged_one": "已更改 {{count}} 个文件",
     "activityFilesChanged_other": "已更改 {{count}} 个文件",
+    "openFile": "打开 {{path}}",
     "plan": "计划",
     "copyPlan": "复制计划",
     "copyPlanMarkdown": "复制为 Markdown 清单",
@@ -1830,10 +1860,25 @@
     "intro": "谁可以使用此 Huabu，以及能打开哪些工作区。成员首次登录后会出现在这里。更改在其下一次请求时生效。",
     "serviceAccess": "服务访问权限",
     "accessVsWorkspace": "服务访问权限决定某人能否使用此 Huabu；开通后没有工作区的人会获得一个个人工作区。将某人添加到工作区不会开通服务访问权限，加入后默认是查看者，可改为编辑者或所有者。",
+    "admission": {
+      "title": "自动开通",
+      "description": "通过{{providers}}登录的任何人都会作为普通成员获得访问权限；没有可打开工作区的人会获得一个个人工作区。自动开通不会让他们成为管理员，也不会把他们加入现有工作区。",
+      "provider": {
+        "entra": "Microsoft Entra ID（仅限此处配置的租户）",
+        "auth0": "Auth0（其登录接受的任何人）"
+      },
+      "providerSeparator": "或",
+      "noProviders": "自动开通仅适用于 Microsoft Entra ID 和 Auth0 登录，而此处两者均未配置。",
+      "keepsRemoved": "你移除的人在你重新开通前无法再进入。关闭自动开通不会移除任何人。",
+      "loadFailed": "无法加载自动开通设置。请重新打开成员页面重试。"
+    },
     "status": {
       "administrator": "管理员",
       "admitted": "已开通",
-      "waiting": "等待开通"
+      "waiting": "等待开通",
+      "blocked": "已移除访问权限",
+      "noAccess": "未开通",
+      "joinedAutomatically": "自动加入"
     },
     "roleIn": "在 {{workspace}} 中的角色",
     "removeRole": "从此工作区移除",

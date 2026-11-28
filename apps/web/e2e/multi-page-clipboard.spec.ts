@@ -291,11 +291,9 @@ async function expectConverged(
   return scene;
 }
 
-/** Requests a page made that are not presence reports or preprocessing. */
+/** Requests a page made that are not presence reports. */
 const writes = (device: Device) =>
-  device.calls.filter(
-    (call) => !call.includes('/presence') && !call.includes('/preprocess'),
-  );
+  device.calls.filter((call) => !call.includes('/presence'));
 
 /** Commands a page sent that are a user's edit, not a measurement report. */
 const edits = (device: Device) =>

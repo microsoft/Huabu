@@ -42,8 +42,10 @@
  */
 
 import { applyStructuredFrameRelayout } from './autoLayout/gridLayout.js';
+import { settleTrackKeys } from './autoLayout/layoutOrder.js';
 import { HANDLERS, COMMAND_META } from './commands/index.js';
 import { isAllowedFor } from './commandScope.js';
+import { settlePaintOrder } from './container/paintOrder.js';
 import {
   fitFrameToChildren,
   normalizeTreeOrder,
@@ -269,8 +271,26 @@ export function executeCanvasEdits(
       }
 
       // Advance the evolving state so the next command of the edit sees
-      // this command's changes.
-      editNodes = result.nodes;
+      // this command's changes, with both kinds of order settled: the next
+      // command reads them. A track key the command left meaningless is
+      // dropped. A node the command created, or moved to another parent
+      // with the key it had there, gets a paint key for where it stands; a
+      // key the command itself named is kept; the array is put in key
+      // order. Both rules compare with the nodes before this command.
+      const before = editNodes;
+      editNodes = settlePaintOrder(
+        settleTrackKeys(
+          result.nodes,
+          before,
+          result.placedTrackKeyIds
+            ? new Set(result.placedTrackKeyIds)
+            : undefined,
+        ) as NestableNode[],
+        before,
+        result.placedPaintKeyIds
+          ? new Set(result.placedPaintKeyIds)
+          : undefined,
+      ) as typeof editNodes;
       editEdges = result.edges;
 
       if (result.mutatedNodes) staged.mutatedNodes.push(...result.mutatedNodes);
@@ -426,6 +446,8 @@ export function executeCanvasEdits(
   // (no sort, no remap, no allocation).
   // ------------------------------------------------------------------
   if (anyApplied) {
+    // Paint order was settled after each command (see the loop above and
+    // `container/paintOrder.ts`): the array is already in key order.
     currentNodes = hidePdfNotes(
       normalizeTreeOrder(currentNodes as NestableNode[]),
     );

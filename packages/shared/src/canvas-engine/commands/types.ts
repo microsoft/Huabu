@@ -41,6 +41,19 @@ export interface CommandHandlerResult {
    * node type / watched fields; that's the server's job.
    */
   mutatedNodes?: Node[];
+  /**
+   * Children this command itself placed in a Column / Row track: their
+   * `trackKey` is the one the command means, even where it equals the one
+   * they had (see `settleTrackKeys`).
+   */
+  placedTrackKeyIds?: string[];
+  /**
+   * Nodes whose `paintKey` this command itself names (a restored node, a
+   * patch that carries the key): the settlement after the command keeps
+   * the key even where it equals the one the node had under another parent
+   * (see `settlePaintOrder`).
+   */
+  placedPaintKeyIds?: string[];
   /** Node IDs that were deleted and need server-side tracking. */
   deletedNodeIds?: string[];
   /**

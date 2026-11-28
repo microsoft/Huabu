@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import {
   commandsForLocalDiff,
   commandsForStateDiff,
+  reorderCommands,
 } from '../localDiffCommands';
 
 import type { UnitNode } from '../propertyUnits';
@@ -176,23 +177,36 @@ describe('commandsForStateDiff', () => {
     ).toEqual({ type: 'SET_NODE_PARENT', nodeIds: ['y'], parentId: null });
   });
 
-  it('moves only the siblings that are out of place', () => {
-    const a: UnitNode = { id: 'a', data: {} };
-    const b: UnitNode = { id: 'b', data: {} };
-    const c: UnitNode = { id: 'c', data: {} };
-    const d: UnitNode = { id: 'd', data: {} };
+  it("states a changed place in the paint order as that node's key", () => {
+    const a: UnitNode = { id: 'a', data: { paintKey: 'a0' } };
+    const b: UnitNode = { id: 'b', data: { paintKey: 'a1' } };
+    const c: UnitNode = { id: 'c', data: { paintKey: 'a2' } };
+    const back: UnitNode = { id: 'c', data: { paintKey: 'Zz' } };
     expect(
       commandsForStateDiff(
-        { nodes: [a, b, c, d], edges: [] },
-        { nodes: [a, d, b, c], edges: [] },
-      ).commands,
-    ).toEqual([{ type: 'REORDER_NODES', nodeIds: ['d'], to: { after: 'a' } }]);
+        { nodes: [a, b, c], edges: [] },
+        { nodes: [back, a, b], edges: [] },
+      ),
+    ).toEqual({
+      commands: [
+        {
+          type: 'MERGE_NODE_DATA',
+          patches: [{ nodeId: 'c', patch: { paintKey: 'Zz' } }],
+        },
+      ],
+      uncovered: [],
+    });
+  });
+
+  it('says nothing about array positions the keys do not back', () => {
+    const a: UnitNode = { id: 'a', data: { paintKey: 'a0' } };
+    const b: UnitNode = { id: 'b', data: { paintKey: 'a1' } };
     expect(
       commandsForStateDiff(
-        { nodes: [a, b, c, d], edges: [] },
-        { nodes: [c, a, b, d], edges: [] },
+        { nodes: [a, b], edges: [] },
+        { nodes: [b, a], edges: [] },
       ).commands,
-    ).toEqual([{ type: 'REORDER_NODES', nodeIds: ['c'], to: { before: 'a' } }]);
+    ).toEqual([]);
   });
 
   it('puts an added edge back as it was', () => {
@@ -208,6 +222,21 @@ describe('commandsForStateDiff', () => {
         nodes: [],
         edges: [{ ...edge, sourceHandle: 'right' }],
       },
+    ]);
+  });
+});
+
+describe('reorderCommands', () => {
+  it('moves only the siblings that are out of place', () => {
+    const a: UnitNode = { id: 'a', data: {} };
+    const b: UnitNode = { id: 'b', data: {} };
+    const c: UnitNode = { id: 'c', data: {} };
+    const d: UnitNode = { id: 'd', data: {} };
+    expect(reorderCommands([a, b, c, d], [a, d, b, c])).toEqual([
+      { type: 'REORDER_NODES', nodeIds: ['d'], to: { after: 'a' } },
+    ]);
+    expect(reorderCommands([a, b, c, d], [c, a, b, d])).toEqual([
+      { type: 'REORDER_NODES', nodeIds: ['c'], to: { before: 'a' } },
     ]);
   });
 });

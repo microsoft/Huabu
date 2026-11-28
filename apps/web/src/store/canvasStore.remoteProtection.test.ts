@@ -8,7 +8,6 @@ const api = vi.hoisted(() => ({
   getCanvas: vi.fn(),
   putNodeContent: vi.fn(),
   getNodeContent: vi.fn(),
-  preprocessNode: vi.fn(),
   postCanvasEvents: vi.fn(),
 }));
 vi.mock('../api', async (actual) => ({
@@ -213,7 +212,6 @@ beforeEach(async () => {
   useCanvasPresenceStore.setState({ localEditingNodeId: null });
   canvasHistoryManager.activate(SPACE, true);
   api.postCanvasExecute.mockImplementation(() => new Promise(() => {}));
-  api.preprocessNode.mockResolvedValue({ success: true });
   api.postCanvasEvents.mockResolvedValue({ success: true });
   api.putNodeContent.mockImplementation(
     async (_canvasId: string, nodeId: string, body: { content?: string }) => ({

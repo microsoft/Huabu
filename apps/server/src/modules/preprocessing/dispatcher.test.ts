@@ -14,22 +14,19 @@ import { describe, expect, it } from 'vitest';
 import { buildPlan } from './dispatcher.js';
 import { getProfile } from './profiles.js';
 
-import type { PreprocessNodeRequest } from '@huabu/shared';
+import type { PreprocessNodeRequest } from './types.js';
 
 function req(
   nodeType: PreprocessNodeRequest['nodeType'],
   snapshot: Record<string, unknown>,
   previousSnapshot?: Record<string, unknown>,
-  options?: PreprocessNodeRequest['options'],
 ): PreprocessNodeRequest {
   return {
     canvasId: 'canvas-test',
     nodeId: 'node-test',
     nodeType,
-    trigger: previousSnapshot ? 'node_updated' : 'node_inserted',
     snapshot,
     previousSnapshot,
-    options,
   };
 }
 
@@ -211,31 +208,9 @@ describe('buildPlan — video cover capability', () => {
       'extract_video_cover',
     );
   });
-
-  it('force retries even when the previous source is unchanged', () => {
-    expect(
-      planFor(
-        req('video', { src: 'a.mp4' }, { src: 'a.mp4' }, { force: true }),
-      ),
-    ).toContain('extract_video_cover');
-  });
 });
 
-describe('buildPlan — overrides & unchanged', () => {
-  it('force runs the full profile regardless of gating', () => {
-    const profile = getProfile('image')!;
-    const plan = buildPlan(
-      profile,
-      req(
-        'image',
-        { src: 'artifact-1.png', title: '幻灯片 1', labelSource: 'agent' },
-        { src: 'artifact-1.png', title: '幻灯片 1', labelSource: 'agent' },
-        { force: true },
-      ),
-    );
-    expect(plan).toEqual(profile.capabilities);
-  });
-
+describe('buildPlan — unchanged', () => {
   it('runs only structural caps when nothing watched changed', () => {
     const plan = planFor(
       req(

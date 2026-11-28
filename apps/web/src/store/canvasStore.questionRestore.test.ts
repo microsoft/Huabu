@@ -21,7 +21,6 @@ vi.mock('../api', async (importOriginal) => ({
 vi.mock('../api/canvas', async (importOriginal) => ({
   ...(await importOriginal<typeof CanvasApi>()),
   putNodeContent,
-  preprocessNode: vi.fn().mockResolvedValue({ success: true }),
 }));
 vi.mock('../api/agent', () => ({ agentApi: { forkThread } }));
 
@@ -31,7 +30,10 @@ import useCanvasStore, {
   resetCanvasSyncForTests,
 } from './canvasStore';
 import { contentRevisionsOf } from './canvasStore/sync/testing/contentRevisions';
-import { createFakeSpaceServer } from './canvasStore/sync/testing/fakeExecuteServer';
+import {
+  createFakeSpaceServer,
+  seedStoredNodes,
+} from './canvasStore/sync/testing/fakeExecuteServer';
 
 import type * as CanvasApi from '../api';
 import type {
@@ -247,7 +249,7 @@ describe('Question creation settlement', () => {
       // A genuinely newer server restoration is not the stale create echo.
       useCanvasStore
         .getState()
-        .applyServerDeltas([delta], 5, pendingEffects, false, undefined, {
+        .applyServerDeltas([delta], 5, pendingEffects, false, {
           nodeContentRevisions: contentRevisionsOf([delta]),
         });
       expect(
@@ -367,14 +369,17 @@ describe('Question creation settlement', () => {
 
 describe('Question undo identity reinsertion', () => {
   it('restores the UI immediately but waits for the batch that restores its Frame before association', async () => {
-    const frame: Node = {
-      id: 'node-restore-frame',
-      type: 'frame',
-      position: { x: 0, y: 0 },
-      style: { width: 600, height: 400 },
-      data: { type: 'frame', label: 'Frame', sizing: 'manual' },
-    };
-    const inside = { ...question, parentId: frame.id };
+    // The snapshot holds nodes as the page had them: keyed.
+    const [frame, inside] = seedStoredNodes<Node>([
+      {
+        id: 'node-restore-frame',
+        type: 'frame',
+        position: { x: 0, y: 0 },
+        style: { width: 600, height: 400 },
+        data: { type: 'frame', label: 'Frame', sizing: 'manual' },
+      },
+      { ...question, parentId: 'node-restore-frame' },
+    ]);
     let answerRestore!: (response: unknown) => void;
     postCanvasExecute.mockReturnValueOnce(
       new Promise((resolve) => {
@@ -436,12 +441,16 @@ describe('Question undo identity reinsertion', () => {
           });
       }),
     );
-    useCanvasStore.getState()._setStateRaw({ nodes: [question] });
+    // As loaded from the server: the node has its paint key.
+    const [loaded] = seedStoredNodes([question]);
+    const { paintKey } = loaded.data;
+    useCanvasStore.getState()._setStateRaw({ nodes: [loaded] });
     useCanvasStore.getState().deleteNodes([question.id]);
     await vi.waitFor(() => expect(sentDeletions()).toEqual([question.id]));
     const confirmed = {
       ...question,
       data: {
+        paintKey,
         content: 'Original intent',
         threadId: 'thread-restore',
         bindingState: 'bound',
@@ -464,12 +473,15 @@ describe('Question undo identity reinsertion', () => {
         data: {
           content: 'Original intent',
           agentBinding: { kind: 'internal' },
+          // The node asks for its old place in the paint order back.
+          paintKey,
         },
       },
       threadId: 'thread-restore',
       requireBinding: true,
     });
     const restored = useCanvasStore.getState().nodes[0];
+    expect(restored.data.paintKey).toBe(paintKey);
     expect(restored.data.threadId).toBe('thread-restore');
     expect(restored.data.bindingState).toBe('bound');
     expect(restored.data).not.toHaveProperty('invocationToken');

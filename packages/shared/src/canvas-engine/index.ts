@@ -1,11 +1,22 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-export { readLayoutOrder, remapLayoutOrder } from './autoLayout/layoutOrder.js';
+export {
+  readTrackKey,
+  settleTrackKeys,
+  trackKeyChanges,
+  withDistinctTrackKeys,
+} from './autoLayout/layoutOrder.js';
 export {
   withMasonryLayoutOrder,
   describeFrameLayout,
 } from './autoLayout/gridLayout.js';
+
+export {
+  MD_BACKED_NODE_TYPES,
+  NODE_CONTENT_KEYS,
+  TEXT_BEARING_NODE_TYPES,
+} from './nodeContentFields.js';
 
 /**
  * @huabu/shared/canvas-engine — pure, server-portable canvas command engine.
@@ -22,6 +33,14 @@ export {
 
 // ── Executor + runtime types ──────────────────────────────────────────────
 export * from './utils/inkSigil.js';
+export { routeOrthogonalEdge } from './utils/orthogonalRouting.js';
+export type {
+  OrthogonalPoint,
+  OrthogonalRect,
+  OrthogonalSide,
+  OrthogonalRoute,
+  OrthogonalRouteOptions,
+} from './utils/orthogonalRouting.js';
 export {
   mergeNodeProperties,
   hasValidNodeProperties,
@@ -89,9 +108,7 @@ export {
 export {
   type Delta,
   type NodeFields,
-  type OrderedDelta,
   applyDeltas,
-  applyOrderedDeltas,
   invertDelta,
   isWholeNode,
   mergeNodeFields,
@@ -103,16 +120,10 @@ export {
   toWireDeltas,
 } from './delta.js';
 export {
-  type SetSiblingOrderEvent,
   type SiblingReorderAdmission,
   type SiblingReorderTarget,
-  isSetSiblingOrderEvent,
   admitSiblingReorder,
   hasUnlockedAncestry,
-  collectSiblingOrders,
-  diffSiblingOrderEvents,
-  applySiblingOrderEvents,
-  SiblingOrderReplayError,
 } from './siblingOrder.js';
 export {
   diffCanvasState,
@@ -273,9 +284,20 @@ export {
   computeContainerFit,
   applyContainerFit,
   assignNodeZIndices,
-  materializeForestOrder,
   edgeZIndex,
+  orderByPaintKeys,
+  readPaintKey,
+  settlePaintOrder,
+  withDistinctPaintKeys,
 } from './container/index.js';
+export {
+  compareOrder,
+  isOrderKey,
+  keyBetween,
+  keysBetween,
+  keysInSequence,
+} from './orderKey.js';
+export { seedNodeOrder } from './seedOrder.js';
 export {
   type UnframeResult,
   type FrameNodesOptions,

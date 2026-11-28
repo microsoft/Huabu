@@ -14,6 +14,7 @@ import type { SupportedLanguage } from '@/i18n';
 const mocks = vi.hoisted(() => ({
   desktop: true,
   write: vi.fn(),
+  read: vi.fn<(key: string) => string | null>(),
   changeLanguage: vi.fn(),
   toast: vi.fn(),
   selectLanguage: null as
@@ -30,6 +31,7 @@ vi.mock('react-i18next', () => ({
 vi.mock('@/i18n', () => ({ supportedLngs: ['en', 'zh-CN'] }));
 vi.mock('@/utils/desktopStorage', () => ({
   writeApplicationPreference: mocks.write,
+  readApplicationPreference: mocks.read,
 }));
 vi.mock('@/components/Common/Toast', () => ({ toast: mocks.toast }));
 vi.mock('@/components/Common/Select', () => ({
@@ -89,6 +91,7 @@ let container: HTMLDivElement;
 beforeEach(async () => {
   mocks.desktop = true;
   mocks.write.mockReset();
+  mocks.read.mockReset().mockReturnValue(null);
   mocks.changeLanguage.mockReset().mockResolvedValue(undefined);
   mocks.toast.mockReset();
   mocks.selectLanguage = null;
@@ -204,3 +207,32 @@ it.each([
     await act(async () => useIdentityStore.setState({ identity: null }));
   },
 );
+
+it('turns each kind of Agent notification off and on by itself', async () => {
+  const toggle = (name: string): HTMLElement => {
+    const element = container.querySelector<HTMLElement>(
+      `[role="switch"][aria-label="${name}"]`,
+    );
+    if (!element) throw new Error(`Missing switch: ${name}`);
+    return element;
+  };
+  expect(toggle('settings.notifyTurnDone').getAttribute('aria-checked')).toBe(
+    'true',
+  );
+  mocks.read.mockImplementation((key) =>
+    key === 'huabu.notifyTurnDone' ? 'false' : null,
+  );
+  await act(async () => toggle('settings.notifyTurnDone').click());
+  expect(mocks.write).toHaveBeenCalledExactlyOnceWith(
+    'huabu.notifyTurnDone',
+    'false',
+  );
+  expect(toggle('settings.notifyTurnDone').getAttribute('aria-checked')).toBe(
+    'false',
+  );
+  expect(toggle('settings.notifyNeedsYou').getAttribute('aria-checked')).toBe(
+    'true',
+  );
+  await act(async () => toggle('settings.notifyTurnDone').click());
+  expect(mocks.write).toHaveBeenLastCalledWith('huabu.notifyTurnDone', null);
+});

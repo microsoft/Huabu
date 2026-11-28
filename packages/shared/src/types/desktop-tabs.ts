@@ -21,13 +21,22 @@ export interface DesktopTabActivation {
   focus: 'shell';
 }
 
+/**
+ * What a person has not seen yet, from least to most pressing: a turn that
+ * ended, one that failed, one that waits for their approval.
+ */
+export type DesktopTabAttention = 'done' | 'error' | 'approval';
+
 export interface DesktopTab {
   id: string;
   canvasId: string | null;
   title: string;
   loading: boolean;
   running: boolean;
-  unread: boolean;
+  /** The most pressing thing in the Space the person has not seen. */
+  attention: DesktopTabAttention | null;
+  /** How many of the Space's conversations hold something not seen. */
+  unseen: number;
   error: string | null;
 }
 
@@ -69,8 +78,29 @@ export type DesktopTabCommand =
 export interface DesktopTabReport {
   title: string;
   running: boolean;
-  completion: string;
   error: string | null;
+  /** The most pressing thing in the Space the person has not seen. */
+  attention: DesktopTabAttention | null;
+  /** How many of the Space's conversations hold something not seen. */
+  unseen: number;
+}
+
+/**
+ * Something an Agent did in a Space that the person may not have seen: a
+ * turn ended, failed, or waits for an approval. The content page words it
+ * and sends only what the person's preferences allow; main shows it as a
+ * system notification unless the person is looking at the Space.
+ */
+export interface DesktopTabNotice {
+  /**
+   * The conversations it tells of. A later notice that tells of any of them
+   * replaces this one.
+   */
+  keys: string[];
+  title: string;
+  body: string;
+  /** The nodes to bring into view when the notice is opened. */
+  nodeIds: string[];
 }
 
 export type DesktopPreferenceKey =
@@ -79,7 +109,9 @@ export type DesktopPreferenceKey =
   | 'huabu-chat-preferences'
   | 'huabu.recentConversationAgentProfile.v1'
   | 'huabu:world-enabled'
-  | 'huabu.minimapEnabled';
+  | 'huabu.minimapEnabled'
+  | 'huabu.notifyTurnDone'
+  | 'huabu.notifyNeedsYou';
 
 export interface DesktopPreferenceChange {
   key: DesktopPreferenceKey;
@@ -118,6 +150,7 @@ export interface DesktopTabsApi {
   ) => () => void;
   ready: () => void;
   report: (report: DesktopTabReport) => void;
+  notify: (notice: DesktopTabNotice) => void;
   workspaceReady: (workspaceId: string) => Promise<DesktopTabResult>;
   beginWorkspaceChange: () => Promise<DesktopTabResult>;
   endWorkspaceChange: () => Promise<DesktopTabResult>;

@@ -127,6 +127,7 @@ Connected-device browsing and the bundled ACP proxy are documented in [device-fi
 | [pi-harness-driver-refactor-plan.md](./proposals/pi-harness-driver-refactor-plan.md)                 | Agenetes harness driver boundary.                                                                                 |
 | [question-node-zoom-lod-avatar.md](./proposals/question-node-zoom-lod-avatar.md)                     | Continuous zoom takeover: question node's agent mark stands in at deep zoom.                                      |
 | [unified-external-agent-settings.md](./proposals/unified-external-agent-settings.md)                 | Unified command-backed and manifest-backed Agent Profiles.                                                        |
+| [unified-node-order.md](./proposals/unified-node-order.md)                                           | Implemented, not merged: paint order, Column/Row reading order and Grid cells as each node's own keys.            |
 | [unified-preview-workspace.md](./proposals/unified-preview-workspace.md)                             | Default tabbed and split workspace for node previews and unbound chats.                                           |
 
 ### Retired records retained at stable paths

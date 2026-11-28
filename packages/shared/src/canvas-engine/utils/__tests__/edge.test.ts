@@ -10,6 +10,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { resolveAccent } from '../../../index.js';
 import { executeCanvasCommands } from '../../executor.js';
 import { applySharedPostEffectsFromWriteResult } from '../../postEffects.js';
+import { seedNodeOrder } from '../../seedOrder.js';
 import {
   applyEdgeStyle,
   DEFAULT_EDGE_STROKE_TOKEN,
@@ -537,7 +538,7 @@ describe('rerouteAllEdges', () => {
     });
 
     it('applies group routing at the shared command boundary and re-evaluates after disconnect', () => {
-      const nodes = screenshot();
+      const nodes = seedNodeOrder(screenshot());
       const command: CanvasCommand = {
         type: 'CONNECT_NODES',
         edges: branches().map(({ source, target }) => ({

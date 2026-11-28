@@ -148,19 +148,22 @@ function contentTypeFor(name: string): string {
 const SANDBOX_POLICY = 'sandbox allow-scripts allow-forms allow-popups';
 
 /**
- * Under per-Space access a blob may come from another principal, and HTML or
- * SVG opened as a page would run with the viewer's session on this origin.
- * Bubble mode therefore renders every stored document in an opaque origin,
- * as the web app's iframes already do, and keeps it out of shared caches,
- * which would serve it without asking the Space guard; local mode is
- * unchanged.
+ * A stored HTML or SVG file opened as a page would run on this origin with
+ * whatever admits its viewer: another principal's session under per-Space
+ * access, the desktop app's launch token in local mode. Every stored document
+ * is therefore rendered in an opaque origin. The web app frames them that way
+ * already, but only the response can make it hold however the document was
+ * reached: a remote page framed with its own origin can redirect to one.
+ *
+ * Under per-Space access the blob is also kept out of shared caches, which
+ * would serve it without asking the Space guard.
  */
-export function sandboxForRestrictedCaller(
+export function sandboxStoredDocument(
   request: FastifyRequest,
   reply: FastifyReply,
 ): void {
-  if (!isRestrictedRequest(request)) return;
-  reply.header('Cache-Control', 'private, no-cache');
+  if (isRestrictedRequest(request))
+    reply.header('Cache-Control', 'private, no-cache');
   // A route's own policy (the Interactive View renderer's) stays enforced;
   // the sandbox is a second policy, and a browser enforces both.
   const existing = reply.getHeader('Content-Security-Policy');
@@ -203,7 +206,7 @@ export async function sendBlob(
     .header('ETag', etag)
     .header('Last-Modified', lastModified)
     .header('X-Content-Type-Options', 'nosniff');
-  sandboxForRestrictedCaller(request, reply);
+  sandboxStoredDocument(request, reply);
 
   if (preconditionFailed(request, lastModified, etag)) {
     await reply.code(412).send({ message: 'Precondition failed' });

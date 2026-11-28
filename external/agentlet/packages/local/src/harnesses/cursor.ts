@@ -1,4 +1,4 @@
-import { defineCommandHarness } from './common/define-command-harness.js'
+import { defineCommandHarness } from './common/define-command-harness.js';
 
 export const cursorHarness = defineCommandHarness({
   id: 'cursor',
@@ -8,4 +8,4 @@ export const cursorHarness = defineCommandHarness({
   autoApproveArgs: ['--yolo'],
   autoApprovePosition: 'before-acp',
   installHint: 'Install from https://cursor.com/docs/cli/installation',
-})
+});

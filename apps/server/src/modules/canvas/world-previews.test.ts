@@ -97,9 +97,24 @@ function writeCanvas(
   refreshCanvasDirIndex();
 }
 
+/**
+ * Nodes without the order key a read gives them. These cases are about
+ * which previews exist and where; paint order has its own tests.
+ */
+function withoutOrderKeys<T>(nodes: T[] | undefined): T[] | undefined {
+  return nodes?.map((node) => {
+    const { paintKey: _paintKey, ...data } = (
+      node as { data: Record<string, unknown> }
+    ).data;
+    return { ...node, data };
+  });
+}
+
 async function previews(): Promise<TestNode[]> {
   return (
-    (await space('canvas-world').read())?.state.nodes as TestNode[]
+    withoutOrderKeys(
+      (await space('canvas-world').read())?.state.nodes as TestNode[],
+    ) as TestNode[]
   ).filter((node) => node.type === 'spacePreview');
 }
 
@@ -570,7 +585,7 @@ describe('World preview reconciliation', () => {
     const filename = path.join(workspaceState.path, '.world', 'space.json');
     const before = readFileSync(filename, 'utf8');
     const loaded = await space('canvas-world').read();
-    expect(loaded?.state.nodes).toEqual([
+    expect(withoutOrderKeys(loaded?.state.nodes)).toEqual([
       {
         id: 'node-child',
         type: 'note',
@@ -837,7 +852,9 @@ describe('Canonical canvas write boundaries', () => {
     const node = { ...preview(), type: 'future-invalid' };
     writeCanvas('Project A', 'canvas-a', [node]);
     const before = diskSnapshot();
-    expect((await space('canvas-a').read())?.state.nodes).toEqual([node]);
+    expect(
+      withoutOrderKeys((await space('canvas-a').read())?.state.nodes),
+    ).toEqual([node]);
     expect(diskSnapshot()).toEqual(before);
     const app = Fastify();
     await app.register(canvasRoutes, { prefix: '/canvas' });

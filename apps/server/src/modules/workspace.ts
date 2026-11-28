@@ -288,6 +288,11 @@ function processWorkspaceKey(): string | null {
   return workspaceKeyOf(_workspaceHandle, _workspacePath);
 }
 
+/** Whether `workspacePath` is the folder this process has active now. */
+export function isActiveWorkspacePath(workspacePath: string): boolean {
+  return _workspacePath === workspacePath;
+}
+
 /**
  * Reserve a namespace switch before asynchronous preparation can touch it.
  *
@@ -343,7 +348,9 @@ export function setWorkspacePath(newPath: string): void {
   const resolvedPath = resolveWorkspacePath(newPath);
   assertNoWorkspaceActivationInProgress();
   assertWorkspacePathChangeAllowed(resolvedPath);
-  prepareWorkspaceOnDisk(resolvedPath);
+  prepareWorkspaceOnDisk(resolvedPath, {
+    inUse: isActiveWorkspacePath(resolvedPath),
+  });
   commitWorkspacePath(resolvedPath);
 }
 

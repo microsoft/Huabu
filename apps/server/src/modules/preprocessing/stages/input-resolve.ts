@@ -18,7 +18,7 @@ import { normalizeUrl } from '../utils.js';
 import { canonicalVideoSrc, videoArtifactKey } from '../video-source.js';
 
 import type { ResolvedInput } from '../types.js';
-import type { PreprocessNodeRequest } from '@huabu/shared';
+import type { PreprocessNodeRequest } from '../types.js';
 
 /**
  * Extract a bare filename from an artifact URI such as

@@ -16,7 +16,10 @@ import {
 import { Button } from '@/components/Common/Button';
 import { cn } from '@/components/Common/cn';
 import { CommandBlock } from '@/components/Common/CommandBlock';
-import { QuestionTakeoverMark } from '@/components/Nodes/question/QuestionTakeoverMark';
+import {
+  QuestionTakeoverMark,
+  resolveQuestionAttentionHalo,
+} from '@/components/Nodes/question/QuestionTakeoverMark';
 import {
   AgentModeIcon,
   ChatModeIcon,
@@ -1496,7 +1499,7 @@ function LodAgentChip({
     // All three unviewed outcomes (done-unread, error, conflict) share ONE
     // attention halo — a crisp inner ring + a wider outer glow — and differ
     // only by colour + ring geometry. done-viewed stays quiet (no glow).
-    ringBoxShadow = `0 0 0 3px color-mix(in srgb, ${attentionColor} 26%, transparent), 0 0 12px 2px color-mix(in srgb, ${attentionColor} 42%, transparent)`;
+    ringBoxShadow = resolveQuestionAttentionHalo(size, attentionColor);
     // Error draws its segmented `::before` ring, so keep its border
     // transparent; done-unread / conflict use a solid identity-coloured ring.
     ringBorderColor = isError ? 'transparent' : attentionColor;

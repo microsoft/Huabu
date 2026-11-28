@@ -112,7 +112,7 @@ vi.mock('@/store/canvasStore', () => ({
 }));
 vi.mock('@/store/chatStore', () => ({
   useChatStore: {
-    getState: () => ({ threadsById: {} }),
+    getState: () => ({ threadsById: {}, threadMap: {} }),
     subscribe: () => () => {},
   },
 }));
@@ -278,7 +278,8 @@ describe('desktop save presentation', () => {
           title: 'A',
           loading: false,
           running: false,
-          unread: false,
+          attention: null,
+          unseen: 0,
           error: null,
         },
       ],

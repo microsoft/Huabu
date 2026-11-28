@@ -70,14 +70,40 @@ export function useRenderedNodeGeometry(
       setGeometry(null);
       return;
     }
-    const element = Array.from(
-      domNode.querySelectorAll<HTMLElement>('.react-flow__node[data-id]'),
-    ).find((candidate) => candidate.dataset.id === nodeId);
-    if (!element) return;
+    let element: HTMLElement | undefined;
+    const observer = new ResizeObserver(() => update(true));
+    const mutationObserver = new MutationObserver(() => update(true));
+    const attach = () => {
+      observer.disconnect();
+      mutationObserver.disconnect();
+      element = Array.from(
+        domNode.querySelectorAll<HTMLElement>('.react-flow__node[data-id]'),
+      ).find((candidate) => candidate.dataset.id === nodeId);
+      if (!element) return;
+      observer.observe(element);
+      mutationObserver.observe(element, { childList: true, subtree: true });
+      const surface = element.querySelector<HTMLElement>('[data-node-surface]');
+      if (surface) {
+        mutationObserver.observe(surface, {
+          attributes: true,
+          attributeFilter: ['style', 'class', 'data-presentation'],
+        });
+      }
+    };
 
     const update = (flush: boolean) => {
-      const surface = element.querySelector<HTMLElement>('[data-node-surface]');
-      if (!surface) return;
+      // A node out of view is not rendered, and is a new element once it is
+      // back: a measurement of the old one would place its HUD wrongly.
+      if (!element?.isConnected) attach();
+      const surface = element?.querySelector<HTMLElement>(
+        '[data-node-surface]',
+      );
+      if (!surface) {
+        const clear = () => setGeometry(null);
+        if (flush) flushSync(clear);
+        else clear();
+        return;
+      }
       const containerRect = domNode.getBoundingClientRect();
       const surfaceRect = surface.getBoundingClientRect();
       const style = getComputedStyle(surface);
@@ -101,17 +127,6 @@ export function useRenderedNodeGeometry(
     };
     measureRef.current = update;
     update(false);
-    const observer = new ResizeObserver(() => update(true));
-    observer.observe(element);
-    const mutationObserver = new MutationObserver(() => update(true));
-    mutationObserver.observe(element, { childList: true, subtree: true });
-    const surface = element.querySelector<HTMLElement>('[data-node-surface]');
-    if (surface) {
-      mutationObserver.observe(surface, {
-        attributes: true,
-        attributeFilter: ['style', 'class', 'data-presentation'],
-      });
-    }
     return () => {
       measureRef.current = null;
       observer.disconnect();

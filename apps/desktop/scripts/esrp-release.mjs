@@ -13,6 +13,46 @@ const builderRequire = createRequire(require.resolve('electron-builder'));
 const { createBlockmap } = builderRequire(
   'app-builder-lib/out/targets/differentialUpdateInfoBuilder.js',
 );
+const { parseDn } = createRequire(require.resolve('electron-updater'))(
+  'builder-util-runtime',
+);
+
+/**
+ * Fail the release unless the installer's signer is one the packaged app will
+ * accept as its update publisher.
+ *
+ * The installed app compares every update's Authenticode signer with the
+ * `publisherName` in its own `app-update.yml` and refuses a mismatch. A
+ * release signed by anyone else would therefore install, and then never
+ * update again. The comparison here is electron-updater's own.
+ */
+export async function assertExpectedPublisher(output, signerSubject) {
+  const config = YAML.parse(
+    await readFile(
+      path.join(output, 'win-unpacked', 'resources', 'app-update.yml'),
+      'utf8',
+    ),
+  );
+  const names = [config?.publisherName ?? []].flat();
+  assert.ok(
+    names.length > 0 && names.every((name) => typeof name === 'string'),
+    'The packaged app names no update publisher',
+  );
+  const signer = parseDn(signerSubject);
+  const accepted = names.some((name) => {
+    const expected = parseDn(name);
+    return expected.size
+      ? [...expected.keys()].every(
+          (key) => expected.get(key) === signer.get(key),
+        )
+      : name === signer.get('CN');
+  });
+  assert.ok(
+    accepted,
+    `Installer signed by "${signerSubject}", but the app accepts updates only from: ${names.join(' | ')}`,
+  );
+  console.log(`Installer signer is an accepted update publisher`);
+}
 
 export async function refreshInstallerMetadata(output, version) {
   assert.match(
@@ -59,10 +99,13 @@ export async function refreshInstallerMetadata(output, version) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  if (!process.argv[2])
-    throw new Error('Expected the Windows release output directory');
+  if (!process.argv[2] || !process.argv[3])
+    throw new Error(
+      'Expected the Windows release output directory and the installer signer subject',
+    );
   const { version } = JSON.parse(
     await readFile(new URL('../package.json', import.meta.url), 'utf8'),
   );
+  await assertExpectedPublisher(path.resolve(process.argv[2]), process.argv[3]);
   await refreshInstallerMetadata(path.resolve(process.argv[2]), version);
 }

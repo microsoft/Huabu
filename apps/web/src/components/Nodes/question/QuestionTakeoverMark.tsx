@@ -43,6 +43,23 @@ export function resolveQuestionSpecialRingGeometry(size: number) {
   return { inset: size / 18, width: size / 12 };
 }
 
+/**
+ * Attention halo for an unviewed outcome: a solid ring hugging the disc, a
+ * translucent band and a soft outer glow. Every length is a ratio of `size`,
+ * so the halo survives the zoomed-out mark instead of thinning below a pixel.
+ * `ringWidth` is 0 when the caller draws the solid ring itself (CSS border).
+ */
+export function resolveQuestionAttentionHalo(
+  size: number,
+  color: string,
+  ringWidth = 0,
+) {
+  const band = `0 0 0 ${ringWidth + size * 0.075}px color-mix(in srgb, ${color} 26%, transparent)`;
+  const glow = `0 0 ${size * 0.3}px ${ringWidth + size * 0.05}px color-mix(in srgb, ${color} 42%, transparent)`;
+  const ring = ringWidth > 0 ? `0 0 0 ${ringWidth}px ${color}, ` : '';
+  return `${ring}${band}, ${glow}`;
+}
+
 export function resolveQuestionTakeoverTone(
   status: QuestionTakeoverMarkProps['status'],
   unread: boolean,
@@ -57,10 +74,13 @@ export function resolveQuestionTakeoverTone(
 }
 
 const AVATAR = QUESTION_TAKEOVER_SIZE * QUESTION_TAKEOVER_AVATAR_RATIO;
+/** Solid halo ring; narrower than the special-ring inset (AVATAR / 18) that
+ * the layout reserves, so published bounds enclose it. */
+const ATTENTION_RING = AVATAR / 20;
 
 /** Visible bounding square, excluding transparent space in the authored footprint. */
 export function questionTakeoverMarkLayout(
-  specialRing: boolean,
+  outerRing: boolean,
   approval: boolean,
   open: boolean,
 ) {
@@ -80,7 +100,7 @@ export function questionTakeoverMarkLayout(
       bubbleTop: -unit + extra,
     };
   }
-  const inset = specialRing ? ring.inset : 0;
+  const inset = outerRing ? ring.inset : 0;
   const satelliteOverhang = approval ? AVATAR * 0.45 * 0.3 : 0;
   const extra = Math.max(inset, satelliteOverhang);
   return {
@@ -116,9 +136,12 @@ export function QuestionTakeoverMark({
   const tone = resolveQuestionTakeoverTone(status, unread, conflictCount);
   const special =
     chip.isRunning || chip.isApproval || (chip.isError && chip.needsAttention);
+  // Done-unread and skipped-write conflicts have no special ring of their own;
+  // they ask for attention with the halo. `idle` never carries either.
+  const halo = !special && chip.needsAttention && status !== 'idle';
   const isDot = presentation === 'dot';
   const layout = questionTakeoverMarkLayout(
-    !isDot && special,
+    !isDot && (special || halo),
     !isDot && chip.isApproval,
     !isDot && isOpen,
   );
@@ -134,12 +157,8 @@ export function QuestionTakeoverMark({
   const neutral = tone === 'neutral';
   const fill = `var(--${neutral ? 'bg-hover' : `${tone}-bg`})`;
   const border = `var(--${neutral ? 'fg-subtle' : `${tone}-light`})`;
-  const ringColor =
-    status === 'idle'
-      ? 'transparent'
-      : chip.needsAttention
-        ? chip.attentionColor
-        : 'var(--edge-default)';
+  const quietRingColor =
+    status === 'idle' ? 'transparent' : 'var(--edge-default)';
   const mark = (
     <div
       data-question-takeover-mark
@@ -228,7 +247,15 @@ export function QuestionTakeoverMark({
                 height: AVATAR,
                 background: isOpen ? 'transparent' : 'var(--bg-surface)',
                 boxShadow:
-                  isOpen || special ? 'none' : `inset 0 0 0 1px ${ringColor}`,
+                  isOpen || special
+                    ? 'none'
+                    : halo
+                      ? resolveQuestionAttentionHalo(
+                          AVATAR,
+                          chip.attentionColor,
+                          ATTENTION_RING,
+                        )
+                      : `inset 0 0 0 1px ${quietRingColor}`,
                 '--question-agent-running-ring': 'var(--info)',
                 '--question-agent-special-ring-inset': `${ring.inset}px`,
                 '--question-agent-special-ring-width': `${ring.width}px`,

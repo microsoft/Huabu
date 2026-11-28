@@ -8,12 +8,15 @@
  * No LLM, no persistence.
  */
 
-import { outboundFetch } from '../../security/outbound.js';
+import { outboundFetch, readBodyWithin } from '../../security/outbound.js';
 import { DocumentLoaderFactory } from '../loaders/index.js';
 
 import type { ResolvedInput, ExtractResult } from '../types.js';
 
 const REMOTE_URL_RE = /^https?:\/\//i;
+
+/** The cap node `src` downloads already use for the same files. */
+const MAX_REMOTE_PDF_BYTES = 50 * 1024 * 1024;
 
 export async function extract(resolved: ResolvedInput): Promise<ExtractResult> {
   const { nodeType } = resolved;
@@ -82,7 +85,7 @@ export async function extract(resolved: ResolvedInput): Promise<ExtractResult> {
           `Failed to fetch remote PDF: ${response.status} ${response.statusText}`,
         );
       }
-      const buffer = Buffer.from(await response.arrayBuffer());
+      const buffer = await readBodyWithin(response, MAX_REMOTE_PDF_BYTES);
       const loader = DocumentLoaderFactory.getLoader('pdf');
       const result = await loader.load(buffer);
       return {

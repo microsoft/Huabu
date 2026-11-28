@@ -946,9 +946,14 @@ test('page A renames a note while page B has an unsaved body in it: both are sav
     expect(device.conflicts).toEqual([]);
     expect((await storeState(device.page)).reloaded).toBe(false);
   }
-  // B's body save carried no title: it could not undo A's rename.
-  expect(saves.seen).toHaveLength(1);
-  expect(saves.seen[0]).not.toHaveProperty('label');
+  // B sent its body, then said the editor was left. Neither save carried a
+  // title, and the server kept the title a person gave: A's rename stands.
+  expect(saves.seen).toEqual([
+    expect.objectContaining({ content: 'Body typed on page B' }),
+    expect.objectContaining({ editingEnded: true }),
+  ]);
+  for (const save of saves.seen) expect(save).not.toHaveProperty('label');
+  expect(saves.seen[1]).not.toHaveProperty('content');
 
   await a.context.close();
   await b.context.close();

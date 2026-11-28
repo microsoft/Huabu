@@ -10,14 +10,8 @@
  * promise settles, so this only ever shares work that is genuinely
  * concurrent — it never serves a stale result.
  *
- * Used by {@link PreprocessDispatcher}: when N open tabs each replay the
- * same broadcast delta they all schedule an identical
- * `POST /:canvasId/nodes/:nodeId/preprocess`. Those requests land within
- * a few milliseconds of each other (one SSE fan-out + the same client
- * debounce), while the pipeline itself — web/pdf extract + LLM enrich —
- * takes far longer, so the later requests reliably find the first one
- * still in flight and reuse it. The expensive pipeline therefore runs
- * once regardless of how many tabs are open.
+ * Used by the conversation title service, where several callers ask for
+ * the same conversation's title while one generation is still running.
  */
 export function coalesceInFlight<T>(
   inFlight: Map<string, Promise<T>>,

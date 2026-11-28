@@ -37,3 +37,54 @@ export function buildNodeDeepLink(
   url.searchParams.set(NODE_QUERY_PARAM, nodeId);
   return url.href;
 }
+
+/** A node addressed from document text, optionally in another Space. */
+export interface NodeReference {
+  nodeId: string;
+  /** Present only for the absolute deep-link form. */
+  canvasId?: string;
+}
+
+const CANVAS_PATH_PATTERN = /^\/canvas\/([^/]+)\/?$/;
+
+function isNodeId(value: string): boolean {
+  return value.length <= MAX_NODE_ID_LENGTH && NODE_ID_PATTERN.test(value);
+}
+
+/**
+ * Recognise the in-app node link forms authored in Markdown: the
+ * Space-relative `#node-<id>` and a `/canvas/<id>?node=<id>` deep link, either
+ * root-relative or absolute on this origin. Anything else is an ordinary
+ * document link.
+ */
+export function parseNodeReferenceHref(
+  href: string | null | undefined,
+  origin: string,
+): NodeReference | null {
+  const trimmed = href?.trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith('#')) {
+    const nodeId = trimmed.slice(1);
+    return isNodeId(nodeId) ? { nodeId } : null;
+  }
+  let url: URL;
+  try {
+    // A root-relative deep link is same-origin by construction; any other
+    // relative href is not a node reference.
+    url =
+      trimmed.startsWith('/') && !trimmed.startsWith('//')
+        ? new URL(trimmed, origin)
+        : new URL(trimmed);
+  } catch {
+    return null;
+  }
+  if (url.origin !== origin) return null;
+  const match = CANVAS_PATH_PATTERN.exec(url.pathname);
+  const intent = readNodeDeepLinkIntent(url.search);
+  if (!match || intent.kind !== 'target') return null;
+  try {
+    return { canvasId: decodeURIComponent(match[1]), nodeId: intent.nodeId };
+  } catch {
+    return null;
+  }
+}
