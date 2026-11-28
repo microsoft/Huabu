@@ -11,11 +11,16 @@ import '@/i18n';
 
 import { FileReferencePreview } from './FileReferencePreview';
 
+import type * as DeviceFilesApi from '@/api/device-files';
+
 const mocks = vi.hoisted(() => ({
   read: vi.fn(),
 }));
 
-vi.mock('@/api/device-files', () => ({ readDeviceFile: mocks.read }));
+vi.mock('@/api/device-files', async (original) => ({
+  ...(await original<typeof DeviceFilesApi>()),
+  readDeviceFile: mocks.read,
+}));
 
 let host: HTMLDivElement;
 let root: Root;
